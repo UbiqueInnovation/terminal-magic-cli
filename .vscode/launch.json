@@ -1,0 +1,16 @@
+{
+    "configurations": [
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "run terminal-magic",
+            "program": "${workspaceRoot}/target/debug/terminal-magic",
+            "args": [],
+            "cwd": "${workspaceRoot}",
+            "sourceMap": {},
+            "sourceLanguages": [
+                "rust"
+            ]
+        }
+    ]
+}
