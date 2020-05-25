@@ -11,6 +11,7 @@ fn main() {
     let mut plugin_test : PluginInfo = toml::from_str(&std::fs::read_to_string("plugintest.toml").unwrap()).unwrap();
     let mut mustache_map = MapBuilder::new();
     for mut placeholder in plugin_test.placeholders.iter_mut() {
+        println!("Read {}", placeholder.0);
         read(&mut placeholder.1);
         mustache_map = mustache_map.insert(placeholder.0, &placeholder.1).expect("Could not parse object");
     }
@@ -35,7 +36,11 @@ fn read(entry_type : &mut EntryType) {
 fn read_value(str : &mut String) {
     let mut prompt = TextPrompt::new(format!("{}? ", str));
         match task::block_on( async {prompt.run().await}) {
-            Ok(Some(s)) => *str = s,
+            Ok(Some(s)) => {
+                if !s.is_empty() {
+                    *str = s
+                }
+            },
             _ => println!("Error reading")
     }
 }
