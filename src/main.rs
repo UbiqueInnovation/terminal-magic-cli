@@ -10,6 +10,7 @@ use prompts::{text::TextPrompt, confirm::ConfirmPrompt,Prompt};
 use async_std::task;
 use std::path::Path;
 use dirs::home_dir;
+use colored::*;
 
 static CONFIG_DIR : &str = ".terminal-magic";
 
@@ -80,9 +81,14 @@ fn update(git_repo : &str, plugin_name : &str) {
 
     let toml_str = std::fs::read_to_string(home_path.join("data.toml")).expect("Could not find config.toml");
     let mut toml : PluginInfo = toml::from_str(&toml_str).expect("Cannot parse TOML");
-    if let Some(internal_deps) = toml.internal_dependencies.as_mut() {
+    if let Some(internal_deps) = toml.plugin_info.internal_dependencies.as_mut() {
         for dep in internal_deps {
             install(git_repo, &dep);
+        }
+    }
+    if let Some(external_deps) = toml.plugin_info.external_dependencies.as_ref() {
+        for dep in external_deps {
+            println!("[{}] needs external dependency {}", plugin_name.yellow(), dep.yellow());
         }
     }
     let mut mustache_map_builder = MapBuilder::new();
@@ -112,9 +118,14 @@ fn install(git_repo : &str, plugin_name : &str) {
     let mustache = mustache::compile_path(path_to_module.join("template.sh")).expect("Could not parse mustache template");
     let toml_str = std::fs::read_to_string(path_to_module.join("config.toml")).expect("Could not find config.toml");
     let mut toml : PluginInfo = toml::from_str(&toml_str).expect("Cannot parse TOML");
-    if let Some(internal_deps) = toml.internal_dependencies.as_mut() {
+    if let Some(internal_deps) = toml.plugin_info.internal_dependencies.as_mut() {
         for dep in internal_deps {
             install(git_repo, &dep);
+        }
+    }
+    if let Some(external_deps) = toml.plugin_info.external_dependencies.as_ref() {
+        for dep in external_deps {
+            println!("[{}] needs external dependency {}", plugin_name.yellow(), dep.yellow());
         }
     }
     let mut mustache_map_builder = MapBuilder::new();
@@ -198,8 +209,6 @@ fn read_object(key : &str, obj : &mut BTreeMap<String, EntryType>) {
 #[derive(Deserialize, Serialize,  Debug)]
 struct PluginInfo {
     plugin_info : Package,
-    internal_dependencies : Option<Vec<String>>,
-    external_dependencies : Option<Vec<String>>,
     placeholders : Option<BTreeMap<String,EntryType>>
 }
 
@@ -209,6 +218,8 @@ struct PluginInfo {
 struct Package {
     author : String,
     version : String,
+    internal_dependencies : Option<Vec<String>>,
+    external_dependencies : Option<Vec<String>>,
     plugin_type : PluginType 
 }
 
