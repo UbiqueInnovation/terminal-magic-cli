@@ -28,4 +28,6 @@ subcommands:
         - INPUT:
             required: true
             index: 1
+  - list:
+      about: List available modules
         

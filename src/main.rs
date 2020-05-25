@@ -14,12 +14,59 @@ use colored::*;
 
 static CONFIG_DIR : &str = ".terminal-magic";
 
+fn read_dir(dir : &Path, base : &str) -> std::io::Result<()> {
+    if dir.is_dir() {
+        for entry in std::fs::read_dir(dir)? {
+            let entry = entry?;
+            let path = entry.path();
+            let str_path = path.to_string_lossy();
+            if str_path.contains(".git") {
+                continue;
+            }
+            if path.is_dir() {
+                let _ = read_dir(&path, base);
+            }
+            if str_path.contains("config.toml") {
+                let module = dir.strip_prefix(base).unwrap();
+                let mut module_str = "".yellow();
+                let mut installed = "";
+                let mut version = String::from("");
+                let module_path = home_dir().expect("Home dir not found").join(CONFIG_DIR).join(module);
+                if module_path.exists() {
+                    module_str = module.to_string_lossy().blue();
+                    let toml = read_config(&module_path.join("config.toml"))?;
+                    version = toml.plugin_info.version.clone();
+                    installed = "(installed)";
+                } else {
+                    module_str = module.to_string_lossy().green();
+                }
+                println!("{} {} {}", module_str, version.blue() , installed.blue());
+            }
+        }
+    }
+    Ok(())
+}
+
+fn read_config(config_path : &Path) -> Result<PluginInfo, std::io::Error>  {
+    let toml_str = std::fs::read_to_string(config_path)?;
+    if let Ok(pi) = toml::from_str(&toml_str) {
+        return Ok(pi);
+    }
+    return Err(std::io::Error::from(std::io::ErrorKind::InvalidData));
+}
+
 fn main() {
     let yaml = load_yaml!("cli.yaml");
     let app = App::from_yaml(yaml);
     let matches = app.get_matches();
     let git_repo = matches.value_of("git_repo").unwrap();
     match matches.subcommand_name() {
+        Some("list") => {
+            if let Some(_) = matches.subcommand_matches("list") {
+                let path_to_module = Path::new(git_repo);
+                read_dir(path_to_module, git_repo);
+            }
+        }
         Some("install") => {
             if let Some(install_cmd) = matches.subcommand_matches("install") {
                 if let Some(plugin_name) = install_cmd.value_of("INPUT") {
@@ -79,8 +126,8 @@ fn update(git_repo : &str, plugin_name : &str) {
     let path_to_module = Path::new(git_repo).join(plugin_name);
     let mustache = mustache::compile_path(path_to_module.join("template.sh")).expect("Could not parse mustache template");
 
-    let toml_str = std::fs::read_to_string(home_path.join("data.toml")).expect("Could not find config.toml");
-    let mut toml : PluginInfo = toml::from_str(&toml_str).expect("Cannot parse TOML");
+    let mut toml = read_config(&home_path.join("data.toml")).expect("Cannot find TOML");
+
     if let Some(internal_deps) = toml.plugin_info.internal_dependencies.as_mut() {
         for dep in internal_deps {
             install(git_repo, &dep);
@@ -98,7 +145,7 @@ fn update(git_repo : &str, plugin_name : &str) {
         }
     }
     let mustache_map = mustache_map_builder.build();
-    render(toml, mustache, mustache_map, plugin_name);
+    render(toml, mustache, mustache_map, plugin_name, &path_to_module);
 }
 
 fn remove(plugin_name : &str) {
@@ -116,8 +163,8 @@ fn install(git_repo : &str, plugin_name : &str) {
     }
     let path_to_module = Path::new(git_repo).join(plugin_name);
     let mustache = mustache::compile_path(path_to_module.join("template.sh")).expect("Could not parse mustache template");
-    let toml_str = std::fs::read_to_string(path_to_module.join("config.toml")).expect("Could not find config.toml");
-    let mut toml : PluginInfo = toml::from_str(&toml_str).expect("Cannot parse TOML");
+
+    let mut toml = read_config(&home_path.join("data.toml")).expect("Cannot find TOML");
     if let Some(internal_deps) = toml.plugin_info.internal_dependencies.as_mut() {
         for dep in internal_deps {
             install(git_repo, &dep);
@@ -137,10 +184,10 @@ fn install(git_repo : &str, plugin_name : &str) {
         }
     }
     let mustache_map = mustache_map_builder.build();
-    render(toml, mustache, mustache_map, plugin_name);
+    render(toml, mustache, mustache_map, plugin_name, &path_to_module);
 }
 
-fn render(mut toml : PluginInfo, mustache : mustache::Template, mustache_map : mustache::Data, plugin_name : &str) {
+fn render(mut toml : PluginInfo, mustache : mustache::Template, mustache_map : mustache::Data, plugin_name : &str, path_to_module : &Path) {
     let home_path = home_dir().expect("Home dir not fount").join(CONFIG_DIR).join(plugin_name);
    
     if let Ok(_) = std::fs::create_dir_all(&home_path) {
@@ -148,6 +195,9 @@ fn render(mut toml : PluginInfo, mustache : mustache::Template, mustache_map : m
     }
     if let Ok(_) = std::fs::remove_file(home_path.join("script.sh")){
         println!("script.sh already existed");
+    }
+    if let Ok(_) = std::fs::copy(path_to_module.join("config.toml"), home_path.join("config.toml")) {
+
     }
     let mut script_file = std::fs::File::create(home_path.join("script.sh")).expect("Could not create file");
     if let Ok(_) = mustache.render_data(&mut script_file, &mustache_map) {
