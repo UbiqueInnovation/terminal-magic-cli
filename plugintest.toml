@@ -1,0 +1,7 @@
+[plugin_info]
+author = "Manfred Mustermann"
+version = "1.0"
+plugin_type = {Shell = "zsh"}
+
+[placeholders]
+DATABASES = {placeholder_type = "Array"}
