@@ -13,17 +13,42 @@ use serde_derive::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use toml;
+use std::sync::Mutex;
 
 static CONFIG_DIR: &str = ".terminal-magic";
+
 lazy_static!{
     static ref HOME : PathBuf = { home_dir().expect("Could not find HOME").join(CONFIG_DIR) };
+    static ref GLOBAL_CONFIG : Mutex<GlobalConfig> = { 
+        let config_dir = home_dir().expect("Could not find HOME").join(CONFIG_DIR).join("global_config.toml");
+        let res : GlobalConfig;
+        if config_dir.exists() {
+            res = toml::from_str(&std::fs::read_to_string(config_dir).expect("Could not find global config")).expect("cannot parse config");
+        } else {
+            res = GlobalConfig {
+                config_path: config_dir,
+                git_repo: String::from("")
+            };
+        }
+        Mutex::new(res)
+    };
 }
 
 fn main() {
     let yaml = load_yaml!("cli.yaml");
     let app = App::from_yaml(yaml);
     let matches = app.get_matches();
-    let git_repo = matches.value_of("git_repo").unwrap();
+    let git_repo : &str;
+   
+    if matches.is_present("git_repo") {
+        git_repo = matches.value_of("git_repo").unwrap();
+        let mut glob_conf = GLOBAL_CONFIG.lock().unwrap();
+        glob_conf.git_repo = String::from(git_repo);
+        glob_conf.save().expect("Could not save global config");
+    } else {
+        git_repo = "";
+    }
+   
     match matches.subcommand_name() {
         Some("list") => {
             if let Some(sub_matches) = matches.subcommand_matches("list") {
@@ -111,6 +136,7 @@ fn main() {
             std::process::exit(1);
         }
     }
+   
     if update_source_file().is_err() {
         eprintln!("{}", "Could not update globals source file".red());
     } else {
@@ -429,5 +455,17 @@ impl std::fmt::Display for EntryType {
             return f.write_str(val);
         }
         f.write_str("")
+    }
+}
+#[derive(Deserialize, Serialize, Debug, PartialEq)]
+struct GlobalConfig {
+    config_path : PathBuf,
+    git_repo : String
+}
+
+impl GlobalConfig {
+    fn save(&self) -> std::io::Result<()>{
+        std::fs::write(self.config_path.as_path(), toml::to_string(self).unwrap())?;
+        Ok(())
     }
 }

@@ -6,7 +6,7 @@ args:
   - git_repo:
       short: g
       long: git_repo
-      required: true
+      required: false
       help: specify the git repo (on disk), where the plugins are found
       takes_value: true
 subcommands:
