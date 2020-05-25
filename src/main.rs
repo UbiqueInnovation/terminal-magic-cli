@@ -5,7 +5,13 @@ use std::collections::BTreeMap;
 fn main() -> Result<(), std::io::Error>{
     let input : PluginInfo = toml::from_str(&std::fs::read_to_string("plugintest.toml")?).unwrap();
     if let Some(inner) = input.placeholders.get("DATABASES") {
-        println!("Found databases is type : {}", inner.placeholder_type)
+        if let EntryType::Array(array) = inner {
+            for entry in array {
+                if let EntryType::Object(inner) = entry {
+                    println!("Found databases path is : {}, name is {}", inner.get("dbPath").unwrap(), inner.get("dbName").unwrap());
+                }
+            }
+        }
     }
    Ok(())
 }
@@ -13,7 +19,7 @@ fn main() -> Result<(), std::io::Error>{
 #[derive(Deserialize, Serialize)]
 struct PluginInfo {
     plugin_info : Package,
-    placeholders : BTreeMap<String, Placeholder>
+    placeholders : BTreeMap<String, EntryType>
 }
 
 #[derive(Deserialize, Serialize)]
@@ -30,6 +36,19 @@ enum PluginType {
 }
 
 #[derive(Deserialize, Serialize)]
-struct Placeholder {
-    placeholder_type : String
+#[serde(untagged)]
+enum EntryType {
+    Value(String),
+    Array(Vec<EntryType>),
+    Object(BTreeMap<String, EntryType>)
+}
+
+impl std::fmt::Display for EntryType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+       if let EntryType::Value(val) = self {
+            return f.write_str(val);
+       }
+       f.write_str("")
+    }
+    
 }

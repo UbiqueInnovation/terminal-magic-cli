@@ -4,4 +4,7 @@ version = "1.0"
 plugin_type = {Shell = "zsh"}
 
 [placeholders]
-DATABASES = {placeholder_type = "Array"}
+DATABASES = [
+    {dbPath = "test", dbName = "test"},
+    {dbPath = "warn", dbName = "warn"}
+]
