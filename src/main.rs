@@ -191,7 +191,7 @@ fn read_array(key : &str, array : &mut Vec<EntryType>) {
 
 fn read_object(key : &str, obj : &mut BTreeMap<String, EntryType>) {
     for mut keys in obj.iter_mut() {
-        read(key, &mut keys.1);
+        read(keys.0, &mut keys.1);
     }
 }
 
