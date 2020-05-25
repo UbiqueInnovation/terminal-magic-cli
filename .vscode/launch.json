@@ -6,7 +6,7 @@
             "name": "run terminal-magic",
             "program": "${workspaceRoot}/target/debug/terminal-magic",
             "preLaunchTask": "Rust: cargo build - terminal-magic",
-            "args": ["-g", "~/Documents/Ubique/terminal-magic-modules", "list", "zsh/vpn"],
+            "args": ["list", "zsh/vpn"],
             "cwd": "${workspaceRoot}",
             "sourceMap": {},
             "sourceLanguages": [

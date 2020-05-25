@@ -38,15 +38,18 @@ fn main() {
     let yaml = load_yaml!("cli.yaml");
     let app = App::from_yaml(yaml);
     let matches = app.get_matches();
-    let git_repo : &str;
-   
-    if matches.is_present("git_repo") {
-        git_repo = matches.value_of("git_repo").unwrap();
+    let git_repo : String;
+    {
         let mut glob_conf = GLOBAL_CONFIG.lock().unwrap();
-        glob_conf.git_repo = String::from(git_repo);
-        glob_conf.save().expect("Could not save global config");
-    } else {
-        git_repo = "";
+        if matches.is_present("git_repo") {
+            git_repo = String::from(matches.value_of("git_repo").unwrap());
+        
+            glob_conf.git_repo = shellexpand::tilde(&git_repo.clone()).to_string();
+            glob_conf.save().expect("Could not save global config");
+        } else {
+            git_repo = shellexpand::tilde(&glob_conf.git_repo.clone()).to_string();
+        }
+        println!("{}", git_repo);
     }
    
     match matches.subcommand_name() {
@@ -86,8 +89,8 @@ fn main() {
                     }
                     std::process::exit(0);
                 }
-                let path_to_module = Path::new(git_repo);
-                if read_dir(path_to_module, git_repo).is_err() {
+                let path_to_module = Path::new(&git_repo);
+                if read_dir(path_to_module, &git_repo).is_err() {
                     eprintln!("{}", "path not found".red());
                 }
             }
@@ -95,7 +98,7 @@ fn main() {
         Some("install") => {
             if let Some(install_cmd) = matches.subcommand_matches("install") {
                 if let Some(plugin_name) = install_cmd.value_of("INPUT") {
-                    install(git_repo, plugin_name);
+                    install(&git_repo, plugin_name);
                 } else {
                     eprintln!("{}", matches.usage());
                     std::process::exit(1);
@@ -108,7 +111,7 @@ fn main() {
         Some("update") => {
             if let Some(install_cmd) = matches.subcommand_matches("update") {
                 if let Some(plugin_name) = install_cmd.value_of("INPUT") {
-                    update(git_repo, plugin_name);
+                    update(&git_repo, plugin_name);
                 } else {
                     eprintln!("{}", matches.usage());
                     std::process::exit(1);
