@@ -49,7 +49,8 @@ fn main() {
         } else {
             git_repo = shellexpand::tilde(&glob_conf.git_repo.clone()).to_string();
         }
-        println!("{}", git_repo);
+        println!("Module Git Repo: {}", git_repo.green());
+        println!("");
     }
    
     match matches.subcommand_name() {
