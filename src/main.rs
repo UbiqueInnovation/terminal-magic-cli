@@ -80,9 +80,14 @@ fn update(git_repo : &str, plugin_name : &str) {
 
     let toml_str = std::fs::read_to_string(home_path.join("data.toml")).expect("Could not find config.toml");
     let mut toml : PluginInfo = toml::from_str(&toml_str).expect("Cannot parse TOML");
+    if let Some(internal_deps) = toml.internal_dependencies.as_mut() {
+        for dep in internal_deps {
+            install(git_repo, &dep);
+        }
+    }
     let mut mustache_map_builder = MapBuilder::new();
-    if let Some(placeholders) = toml.placeholders {
-        for mut placeholder in toml.placeholders.iter_mut() {
+    if let Some(placeholders) = toml.placeholders.as_mut() {
+        for mut placeholder in placeholders.iter_mut() {
             mustache_map_builder = mustache_map_builder.insert(placeholder.0, &placeholder.1).expect("Could not parse object");
         }
     }
@@ -107,8 +112,13 @@ fn install(git_repo : &str, plugin_name : &str) {
     let mustache = mustache::compile_path(path_to_module.join("template.sh")).expect("Could not parse mustache template");
     let toml_str = std::fs::read_to_string(path_to_module.join("config.toml")).expect("Could not find config.toml");
     let mut toml : PluginInfo = toml::from_str(&toml_str).expect("Cannot parse TOML");
+    if let Some(internal_deps) = toml.internal_dependencies.as_mut() {
+        for dep in internal_deps {
+            install(git_repo, &dep);
+        }
+    }
     let mut mustache_map_builder = MapBuilder::new();
-    if let Some(placeholders) = toml.placeholders {
+    if let Some(mut placeholders) = toml.placeholders.as_mut() {
         for mut placeholder in placeholders.iter_mut() {
             println!("Read {}", placeholder.0);
             read(&mut placeholder.1);
