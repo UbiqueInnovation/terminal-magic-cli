@@ -1,0 +1,28 @@
+name: Terminal Magic
+version: "1.0"
+author: Systems Department @UbiqueCH
+about: Manage Ubique internal zsh stuff (aka Terminal Magic)
+args:
+  - git_repo:
+      short: g
+      long: git_repo
+      value_name: GIT_REPO
+      help: specify the git repo (on disk), where the plugins are found
+      takes_value: true
+subcommands:
+  - install:
+      about: Install new extension. Use path from Git Repo as name
+      args:
+        - INPUT:
+            required: true
+            index: 1
+  # - remove:
+  #     about: Remove extension. Use path from Git Repo as name
+  - update:
+      about: Update new extension.
+      args:
+        - placeholders:
+            short: p
+            help: Use specified placeholder file. Default is found in ~/.terminal-magic/<PATH>
+            takes_value: true
+        
