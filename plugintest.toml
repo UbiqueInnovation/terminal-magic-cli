@@ -4,7 +4,6 @@ version = "1.0"
 plugin_type = {Shell = "zsh"}
 
 [placeholders]
-DATABASES = [
-    {dbPath = "test", dbName = "test"},
-    {dbPath = "warn", dbName = "warn"}
+databases = [
+    {shortName = "adsad", dbPath = "warnWetter", containerName = "echo_balbal", port = "5432"}
 ]
