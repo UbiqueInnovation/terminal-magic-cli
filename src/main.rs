@@ -118,7 +118,7 @@ fn main() {
 }
 
 fn update(git_repo : &str, plugin_name : &str) {
-    let home_path = home_dir().expect("Home dir not fount").join(CONFIG_DIR).join(plugin_name);
+    let home_path = home_dir().expect("Home dir not found").join(CONFIG_DIR).join(plugin_name);
     if !home_path.exists() {
         eprintln!("module is not installed");
         std::process::exit(1);
@@ -127,6 +127,25 @@ fn update(git_repo : &str, plugin_name : &str) {
     let mustache = mustache::compile_path(path_to_module.join("template.sh")).expect("Could not parse mustache template");
 
     let mut toml = read_config(&home_path.join("data.toml")).expect("Cannot find TOML");
+
+
+    let old_config = read_config(&home_path.join("config.toml")).expect("old config not found");
+    let new_config = read_config(&path_to_module.join("config.toml")).expect("module config not found");
+
+    if old_config != new_config {
+        eprintln!("{}", "Cannot update since config changed. Need manual merge".yellow());
+        eprintln!("");
+        let old_config = toml::to_string(&old_config).unwrap();
+        let new_config = toml::to_string(&new_config).unwrap();
+        for diff in diff::lines(&old_config, &new_config) {
+            match diff {
+                diff::Result::Left(l)    => println!("-{}", l.red()),
+                diff::Result::Both(l, _) => println!(" {}", l),
+                diff::Result::Right(r)   => println!("+{}", r.green())
+            }
+        }
+        std::process::exit(1);
+    }
 
     if let Some(internal_deps) = toml.plugin_info.internal_dependencies.as_mut() {
         for dep in internal_deps {
@@ -138,6 +157,9 @@ fn update(git_repo : &str, plugin_name : &str) {
             println!("[{}] needs external dependency {}", plugin_name.yellow(), dep.yellow());
         }
     }
+
+   
+
     let mut mustache_map_builder = MapBuilder::new();
     if let Some(placeholders) = toml.placeholders.as_mut() {
         for mut placeholder in placeholders.iter_mut() {
@@ -196,6 +218,7 @@ fn render(mut toml : PluginInfo, mustache : mustache::Template, mustache_map : m
     if let Ok(_) = std::fs::remove_file(home_path.join("script.sh")){
         println!("script.sh already existed");
     }
+
     if let Ok(_) = std::fs::copy(path_to_module.join("config.toml"), home_path.join("config.toml")) {
 
     }
@@ -256,7 +279,7 @@ fn read_object(key : &str, obj : &mut BTreeMap<String, EntryType>) {
     }
 }
 
-#[derive(Deserialize, Serialize,  Debug)]
+#[derive(Deserialize, Serialize,  Debug, PartialEq)]
 struct PluginInfo {
     plugin_info : Package,
     placeholders : Option<BTreeMap<String,EntryType>>
@@ -264,7 +287,7 @@ struct PluginInfo {
 
 
 
-#[derive(Deserialize, Serialize, Debug)]
+#[derive(Deserialize, Serialize, Debug,PartialEq)]
 struct Package {
     author : String,
     version : String,
@@ -273,7 +296,7 @@ struct Package {
     plugin_type : PluginType 
 }
 
-#[derive(Deserialize, Serialize,Debug)]
+#[derive(Deserialize, Serialize,Debug,PartialEq)]
 #[serde(untagged)]
 enum PluginType {
     Shell(String),
@@ -296,19 +319,4 @@ impl std::fmt::Display for EntryType {
        f.write_str("")
     }
     
-}
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
-struct Blub {
-    test : Test
-}
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
-struct Test {
-    actions : Actions
-}
-
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
-#[serde(untagged)]
-enum Actions {
-    Wait(usize),
-    Move { x: usize, y: usize },
 }
