@@ -121,7 +121,7 @@ fn install(git_repo : &str, plugin_name : &str) {
     if let Some(mut placeholders) = toml.placeholders.as_mut() {
         for mut placeholder in placeholders.iter_mut() {
             println!("Read {}", placeholder.0);
-            read(&mut placeholder.1);
+            read(&placeholder.0,&mut placeholder.1);
             mustache_map_builder = mustache_map_builder.insert(placeholder.0, &placeholder.1).expect("Could not parse object");
         }
     }
@@ -149,22 +149,22 @@ fn render(mut toml : PluginInfo, mustache : mustache::Template, mustache_map : m
     }   
 }
 
-fn read(entry_type : &mut EntryType) {
+fn read(key : &str, entry_type : &mut EntryType) {
     match entry_type {
         EntryType::Value(str ) => {
-            read_value(str);
+            read_value(key, str);
         },
         EntryType::Array(array) => {
-            read_array(array);
+            read_array(key, array);
         },
         EntryType::Object(obj) => {
-            read_object(obj);
+            read_object(key, obj);
         }
     }
 }
 
-fn read_value(str : &mut String) {
-    let mut prompt = TextPrompt::new(format!("{}? ", str));
+fn read_value(key : &str, str : &mut String) {
+    let mut prompt = TextPrompt::new(format!("{} [{}]? ", key, str));
     match task::block_on( async {prompt.run().await}) {
         Ok(Some(s)) => {
             if !s.is_empty() {
@@ -175,11 +175,11 @@ fn read_value(str : &mut String) {
     }
 }
 
-fn read_array(array : &mut Vec<EntryType>) {
+fn read_array(key : &str, array : &mut Vec<EntryType>) {
     let proto_type : EntryType =  array.pop().expect("We need a prototype");
     loop {
         let mut object  = proto_type.clone();
-        read(&mut object);
+        read(key, &mut object);
         array.push(object);
         let mut prompt = ConfirmPrompt::new(format!("Another one? "));
         match task::block_on( async {prompt.run().await}) {
@@ -189,9 +189,9 @@ fn read_array(array : &mut Vec<EntryType>) {
     }
 }
 
-fn read_object(obj : &mut BTreeMap<String, EntryType>) {
+fn read_object(key : &str, obj : &mut BTreeMap<String, EntryType>) {
     for mut keys in obj.iter_mut() {
-        read(&mut keys.1);
+        read(key, &mut keys.1);
     }
 }
 
