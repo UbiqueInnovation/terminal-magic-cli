@@ -1,5 +1,7 @@
 #[macro_use]
 extern crate clap;
+#[macro_use]
+extern crate lazy_static;
 use clap::App;
 
 use async_std::task;
@@ -9,10 +11,13 @@ use mustache::MapBuilder;
 use prompts::{confirm::ConfirmPrompt, text::TextPrompt, Prompt};
 use serde_derive::{Deserialize, Serialize};
 use std::collections::BTreeMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use toml;
 
 static CONFIG_DIR: &str = ".terminal-magic";
+lazy_static!{
+    static ref HOME : PathBuf = { home_dir().expect("Could not find HOME").join(CONFIG_DIR) };
+}
 
 fn main() {
     let yaml = load_yaml!("cli.yaml");
@@ -21,7 +26,41 @@ fn main() {
     let git_repo = matches.value_of("git_repo").unwrap();
     match matches.subcommand_name() {
         Some("list") => {
-            if let Some(_) = matches.subcommand_matches("list") {
+            if let Some(sub_matches) = matches.subcommand_matches("list") {
+                if sub_matches.is_present("INPUT") {
+                    let module = sub_matches.value_of("INPUT").unwrap();
+                    let module_path = Path::new(module).join("script.sh");
+                    let base = HOME.join(module);
+
+                    if let Ok(installed_modules) = get_list_of_installed_modules(&HOME, &HOME.to_string_lossy()) {
+                        if installed_modules.contains(&String::from(module_path.to_string_lossy())) {
+                            let config = read_config(&(base.join("config.toml"))).expect("No config for module found");
+                            println!("Module {}", module.green());
+                            println!("Author: {}", config.plugin_info.author.green());
+                            println!("Installed Version: {}", config.plugin_info.version.green());
+                            println!("");
+                            if let Some(internal_dependencies) = &config.plugin_info.internal_dependencies {
+                                for dep in internal_dependencies {
+                                    let dep_path = Path::new(dep).join("script.sh");
+                                    if installed_modules.contains(&dep_path.to_string_lossy().to_string()) { continue }
+                                    println!("{} {} {} {} {}","Module".yellow(), dep.green(),"not installed, but is listed as a dependency. Consider using".yellow() ,"terminal-magic install".green(), dep.green());
+                                }
+                            }
+                            println!("");
+                            if let Some(external_dependencies) = &config.plugin_info.external_dependencies {
+                                for dep in external_dependencies {
+                                    println!("External Dependency {}", dep.green());
+                                }
+                            }
+                            println!("Placeholders: ");
+                            if let Some(placeholders) = &config.placeholders {
+                                print!("{}", format!("{:?}",placeholders).green());
+                            }
+                           
+                        }
+                    }
+                    std::process::exit(0);
+                }
                 let path_to_module = Path::new(git_repo);
                 if read_dir(path_to_module, git_repo).is_err() {
                     eprintln!("{}", "path not found".red());
@@ -76,7 +115,7 @@ fn main() {
         eprintln!("{}", "Could not update globals source file".red());
     } else {
         println!(
-            "Make sure to include {}{}{} in your ~/zshrc",
+            "Make sure to include {}{}{} in your ~/.zshrc",
             "source ~/".green(),
             CONFIG_DIR.green(),
             "/env".green()
@@ -101,10 +140,7 @@ fn read_dir(dir: &Path, base: &str) -> std::io::Result<()> {
                 let module_str: ColoredString;
                 let mut installed = "";
                 let mut version = String::from("");
-                let module_path = home_dir()
-                    .expect("Home dir not found")
-                    .join(CONFIG_DIR)
-                    .join(module);
+                let module_path = HOME.join(module);
                 if module_path.exists() {
                     module_str = module.to_string_lossy().blue();
                     let toml = read_config(&module_path.join("config.toml"))?;
@@ -154,7 +190,7 @@ fn get_list_of_installed_modules(path: &Path, base: &str) -> std::io::Result<Vec
 }
 
 fn update_source_file() -> std::io::Result<()> {
-    let base = home_dir().expect("Home dir not found").join(CONFIG_DIR);
+    let base = &HOME;
     let modules = get_list_of_installed_modules(&base, &base.to_string_lossy())?;
     let env_path = base.join("env");
     if env_path.exists() {
@@ -170,10 +206,7 @@ fn update_source_file() -> std::io::Result<()> {
 }
 
 fn update(git_repo: &str, plugin_name: &str) {
-    let home_path = home_dir()
-        .expect("Home dir not found")
-        .join(CONFIG_DIR)
-        .join(plugin_name);
+    let home_path = HOME.join(plugin_name);
     if !home_path.exists() {
         eprintln!("module is not installed");
         std::process::exit(1);
@@ -235,10 +268,7 @@ fn update(git_repo: &str, plugin_name: &str) {
 }
 
 fn remove(plugin_name: &str) {
-    let home_path = home_dir()
-        .expect("Home dir not found")
-        .join(CONFIG_DIR)
-        .join(plugin_name);
+    let home_path = HOME.join(plugin_name);
     if !home_path.exists() {
         return;
     }
@@ -246,10 +276,7 @@ fn remove(plugin_name: &str) {
 }
 
 fn install(git_repo: &str, plugin_name: &str) {
-    let home_path = home_dir()
-        .expect("Home dir not fount")
-        .join(CONFIG_DIR)
-        .join(plugin_name);
+    let home_path = HOME.join(plugin_name);
     if home_path.exists() {
         return;
     }
@@ -293,10 +320,7 @@ fn render(
     plugin_name: &str,
     path_to_module: &Path,
 ) {
-    let home_path = home_dir()
-        .expect("Home dir not fount")
-        .join(CONFIG_DIR)
-        .join(plugin_name);
+    let home_path = HOME.join(plugin_name);
     if let Ok(_) = std::fs::create_dir_all(&home_path) {
         println!("Created directory");
     }

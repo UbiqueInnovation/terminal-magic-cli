@@ -30,4 +30,6 @@ subcommands:
             index: 1
   - list:
       about: List available modules
-        
+      args:
+        - INPUT:
+            required: false
