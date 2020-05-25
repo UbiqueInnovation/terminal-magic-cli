@@ -81,8 +81,10 @@ fn update(git_repo : &str, plugin_name : &str) {
     let toml_str = std::fs::read_to_string(home_path.join("data.toml")).expect("Could not find config.toml");
     let mut toml : PluginInfo = toml::from_str(&toml_str).expect("Cannot parse TOML");
     let mut mustache_map_builder = MapBuilder::new();
-    for mut placeholder in toml.placeholders.iter_mut() {
-        mustache_map_builder = mustache_map_builder.insert(placeholder.0, &placeholder.1).expect("Could not parse object");
+    if let Some(placeholders) = toml.placeholders {
+        for mut placeholder in toml.placeholders.iter_mut() {
+            mustache_map_builder = mustache_map_builder.insert(placeholder.0, &placeholder.1).expect("Could not parse object");
+        }
     }
     let mustache_map = mustache_map_builder.build();
     render(toml, mustache, mustache_map, plugin_name);
@@ -106,10 +108,12 @@ fn install(git_repo : &str, plugin_name : &str) {
     let toml_str = std::fs::read_to_string(path_to_module.join("config.toml")).expect("Could not find config.toml");
     let mut toml : PluginInfo = toml::from_str(&toml_str).expect("Cannot parse TOML");
     let mut mustache_map_builder = MapBuilder::new();
-    for mut placeholder in toml.placeholders.iter_mut() {
-        println!("Read {}", placeholder.0);
-        read(&mut placeholder.1);
-        mustache_map_builder = mustache_map_builder.insert(placeholder.0, &placeholder.1).expect("Could not parse object");
+    if let Some(placeholders) = toml.placeholders {
+        for mut placeholder in placeholders.iter_mut() {
+            println!("Read {}", placeholder.0);
+            read(&mut placeholder.1);
+            mustache_map_builder = mustache_map_builder.insert(placeholder.0, &placeholder.1).expect("Could not parse object");
+        }
     }
     let mustache_map = mustache_map_builder.build();
     render(toml, mustache, mustache_map, plugin_name);
@@ -186,7 +190,7 @@ struct PluginInfo {
     plugin_info : Package,
     internal_dependencies : Option<Vec<String>>,
     external_dependencies : Option<Vec<String>>,
-    placeholders : BTreeMap<String,EntryType>
+    placeholders : Option<BTreeMap<String,EntryType>>
 }
 
 
