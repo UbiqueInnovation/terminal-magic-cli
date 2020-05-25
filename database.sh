@@ -31,7 +31,7 @@ function docker-db() {
     docker-compose -p $dbName -f $dbPath up -d
   fi
 }
-compdef '_values "docker dbs" {{allDbs}}' docker-db
+compdef '_values "docker dbs" {{short_string}}' docker-db
 
 function _freePort() {
   local toClose=`docker ps | awk -v port="0.0.0.0:$1->" '$0 ~ port { print $NF; exit }'`

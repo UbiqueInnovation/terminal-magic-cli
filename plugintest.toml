@@ -1,9 +1,15 @@
 [plugin_info]
 author = "Manfred Mustermann"
 version = "1.0"
-plugin_type = {Shell = "zsh"}
+plugin_type = "zsh"
 
 [placeholders]
-databases = [
-    {shortName = "adsad", dbPath = "warnWetter", containerName = "echo_balbal", port = "5432"}
-]
+_short_string = "test"
+
+[[placeholders.databases]]
+shortName = "adsad"
+dbPath = "warnWetter"
+containerName = "echo_balbal"
+port = "5432"
+
+
