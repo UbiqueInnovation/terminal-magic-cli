@@ -28,7 +28,7 @@ fn read_dir(dir : &Path, base : &str) -> std::io::Result<()> {
             }
             if str_path.contains("config.toml") {
                 let module = dir.strip_prefix(base).unwrap();
-                let mut module_str = "".yellow();
+                let module_str : ColoredString;
                 let mut installed = "";
                 let mut version = String::from("");
                 let module_path = home_dir().expect("Home dir not found").join(CONFIG_DIR).join(module);
@@ -64,7 +64,9 @@ fn main() {
         Some("list") => {
             if let Some(_) = matches.subcommand_matches("list") {
                 let path_to_module = Path::new(git_repo);
-                read_dir(path_to_module, git_repo);
+                if read_dir(path_to_module, git_repo).is_err() {
+                    eprintln!("{}", "path not found".red());
+                }
             }
         }
         Some("install") => {
@@ -110,11 +112,48 @@ fn main() {
             }
         },
         _ => {
-            let mut out = std::io::stdout();
             eprintln!("{}", matches.usage());
             std::process::exit(1);
         }
     }
+    if update_source_file().is_err() {
+        eprintln!("{}", "Could not update globals source file".red());
+    } else {
+        println!("Make sure to include {}{}{} in your ~/zshrc", "source ~/".green(), CONFIG_DIR.green(), "/env".green())
+    }
+}
+
+
+fn get_list_of_installed_modules(path : &Path, base : &str) -> std::io::Result<Vec<String>> {
+    let mut out_result : Vec<String> = vec![];
+    if path.is_dir() {
+        for entry in path.read_dir()? {
+            let entry = entry?;
+            let path = entry.path();
+            if path.is_dir() {
+                if let Ok(mut list) = get_list_of_installed_modules(&path, base) {
+                    out_result.append(&mut list);
+                }
+            } else {
+                if path.to_string_lossy().contains("script.sh") {
+                    out_result.push(path.strip_prefix(base).unwrap().to_string_lossy().to_string());
+                }
+            }
+        }
+    }
+    Ok(out_result)
+}
+
+fn update_source_file() -> std::io::Result<()> {
+    let base = home_dir().expect("Home dir not found").join(CONFIG_DIR);
+    let modules = get_list_of_installed_modules(&base,&base.to_string_lossy())?;
+    let env_path = base.join("env");
+    if env_path.exists() {
+        std::fs::remove_file(&env_path).expect("Cannot delete file");
+    }
+    let mapped_values : String = modules.into_iter().map(|val| format!("source {}", base.join(val).to_string_lossy())).collect::<Vec<String>>().join("\n");
+    std::fs::write(env_path, mapped_values)?;
+    Ok(())
 }
 
 fn update(git_repo : &str, plugin_name : &str) {
@@ -129,22 +168,23 @@ fn update(git_repo : &str, plugin_name : &str) {
     let mut toml = read_config(&home_path.join("data.toml")).expect("Cannot find TOML");
 
 
-    let old_config = read_config(&home_path.join("config.toml")).expect("old config not found");
-    let new_config = read_config(&path_to_module.join("config.toml")).expect("module config not found");
+    if let Ok(old_config) = read_config(&home_path.join("config.toml")) {
+        let new_config = read_config(&path_to_module.join("config.toml")).expect("module config not found");
 
-    if old_config != new_config {
-        eprintln!("{}", "Cannot update since config changed. Need manual merge".yellow());
-        eprintln!("");
-        let old_config = toml::to_string(&old_config).unwrap();
-        let new_config = toml::to_string(&new_config).unwrap();
-        for diff in diff::lines(&old_config, &new_config) {
-            match diff {
-                diff::Result::Left(l)    => println!("-{}", l.red()),
-                diff::Result::Both(l, _) => println!(" {}", l),
-                diff::Result::Right(r)   => println!("+{}", r.green())
+        if old_config != new_config {
+            eprintln!("{}", "Cannot update since config changed. Need manual merge".yellow());
+            eprintln!("");
+            let old_config = toml::to_string(&old_config).unwrap();
+            let new_config = toml::to_string(&new_config).unwrap();
+            for diff in diff::lines(&old_config, &new_config) {
+                match diff {
+                    diff::Result::Left(l)    => println!("-{}", l.red()),
+                    diff::Result::Both(l, _) => println!(" {}", l),
+                    diff::Result::Right(r)   => println!("+{}", r.green())
+                }
             }
+            std::process::exit(1);
         }
-        std::process::exit(1);
     }
 
     if let Some(internal_deps) = toml.plugin_info.internal_dependencies.as_mut() {
@@ -162,7 +202,7 @@ fn update(git_repo : &str, plugin_name : &str) {
 
     let mut mustache_map_builder = MapBuilder::new();
     if let Some(placeholders) = toml.placeholders.as_mut() {
-        for mut placeholder in placeholders.iter_mut() {
+        for placeholder in placeholders.iter_mut() {
             mustache_map_builder = mustache_map_builder.insert(placeholder.0, &placeholder.1).expect("Could not parse object");
         }
     }
@@ -186,7 +226,7 @@ fn install(git_repo : &str, plugin_name : &str) {
     let path_to_module = Path::new(git_repo).join(plugin_name);
     let mustache = mustache::compile_path(path_to_module.join("template.sh")).expect("Could not parse mustache template");
 
-    let mut toml = read_config(&home_path.join("data.toml")).expect("Cannot find TOML");
+    let mut toml = read_config(&path_to_module.join("config.toml")).expect("Cannot find TOML");
     if let Some(internal_deps) = toml.plugin_info.internal_dependencies.as_mut() {
         for dep in internal_deps {
             install(git_repo, &dep);
@@ -198,7 +238,7 @@ fn install(git_repo : &str, plugin_name : &str) {
         }
     }
     let mut mustache_map_builder = MapBuilder::new();
-    if let Some(mut placeholders) = toml.placeholders.as_mut() {
+    if let Some(placeholders) = toml.placeholders.as_mut(){
         for mut placeholder in placeholders.iter_mut() {
             println!("Read {}", placeholder.0);
             read(&placeholder.0,&mut placeholder.1);
@@ -209,7 +249,7 @@ fn install(git_repo : &str, plugin_name : &str) {
     render(toml, mustache, mustache_map, plugin_name, &path_to_module);
 }
 
-fn render(mut toml : PluginInfo, mustache : mustache::Template, mustache_map : mustache::Data, plugin_name : &str, path_to_module : &Path) {
+fn render(toml : PluginInfo, mustache : mustache::Template, mustache_map : mustache::Data, plugin_name : &str, path_to_module : &Path) {
     let home_path = home_dir().expect("Home dir not fount").join(CONFIG_DIR).join(plugin_name);
    
     if let Ok(_) = std::fs::create_dir_all(&home_path) {
@@ -242,7 +282,7 @@ fn read(key : &str, entry_type : &mut EntryType) {
             read_array(key, array);
         },
         EntryType::Object(obj) => {
-            read_object(key, obj);
+            read_object(obj);
         }
     }
 }
@@ -273,7 +313,7 @@ fn read_array(key : &str, array : &mut Vec<EntryType>) {
     }
 }
 
-fn read_object(key : &str, obj : &mut BTreeMap<String, EntryType>) {
+fn read_object(obj : &mut BTreeMap<String, EntryType>) {
     for mut keys in obj.iter_mut() {
         read(keys.0, &mut keys.1);
     }
