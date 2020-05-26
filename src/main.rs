@@ -62,17 +62,26 @@ fn main() {
                     let base = HOME.join(module);
 
                     if let Ok(installed_modules) = get_list_of_installed_modules(&HOME, &HOME.to_string_lossy()) {
+                        let config : PluginInfo;
                         if installed_modules.contains(&String::from(module_path.to_string_lossy())) {
-                            let config = read_config(&(base.join("config.toml"))).expect("No config for module found");
+                            config = read_config(&(base.join("config.toml"))).expect("No config for module found");
+                        } else {
+                            config = read_config(&Path::new(&git_repo).join(module).join("config.toml")).expect("Cannot find module");
+                        }
                             println!("Module {}", module.green());
                             println!("Author: {}", config.plugin_info.author.green());
                             println!("Installed Version: {}", config.plugin_info.version.green());
                             println!("");
+                            if let Some(help) = config.plugin_info.help {
+                                println!("{}", help.yellow());
+                                println!("");
+                            }
+                            
                             if let Some(internal_dependencies) = &config.plugin_info.internal_dependencies {
                                 for dep in internal_dependencies {
                                     let dep_path = Path::new(dep).join("script.sh");
                                     if installed_modules.contains(&dep_path.to_string_lossy().to_string()) { continue }
-                                    println!("{} {} {} {} {}","Module".yellow(), dep.green(),"not installed, but is listed as a dependency. Consider using".yellow() ,"terminal-magic install".green(), dep.green());
+                                    println!("{} {} {} {} {}","Module".yellow(), dep.green(),"not installed, but is listed as a dependency. Consider using".yellow() ,"terminal-magic install".green().bold(), dep.green());
                                 }
                             }
                             println!("");
@@ -86,7 +95,7 @@ fn main() {
                                 print!("{}", format!("{:?}",placeholders).green());
                             }
                            
-                        }
+                        
                     }
                     std::process::exit(0);
                 }
@@ -454,6 +463,7 @@ struct PluginInfo {
 struct Package {
     author: String,
     version: String,
+    help: Option<String>,
     internal_dependencies: Option<Vec<String>>,
     external_dependencies: Option<Vec<String>>,
     plugin_type: PluginType,
