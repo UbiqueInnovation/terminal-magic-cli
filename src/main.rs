@@ -266,30 +266,25 @@ fn update(git_repo: &str, plugin_name: &str) {
         .expect("Could not parse mustache template");
 
     let mut toml = read_config(&home_path.join("data.toml")).expect("Cannot find TOML");
-
-    if let Ok(old_config) = read_config(&home_path.join("config.toml")) {
+    let old_config = read_config(&home_path.join("config.toml")).expect("Cannot find old config (maybe you did update terminal-magic)");
         let new_config =
             read_config(&path_to_module.join("config.toml")).expect("module config not found");
 
-        if old_config != new_config {
-            eprintln!(
-                "{}",
-                "Cannot update since config changed. Need manual merge".yellow()
-            );
-            eprintln!("");
-            let old_config = toml::to_string(&old_config).unwrap();
-            let new_config = toml::to_string(&new_config).unwrap();
-            for diff in diff::lines(&old_config, &new_config) {
-                match diff {
-                    diff::Result::Left(l) => println!("-{}", l.red()),
-                    diff::Result::Both(l, _) => println!(" {}", l),
-                    diff::Result::Right(r) => println!("+{}", r.green()),
-                }
+    if old_config != new_config {
+        eprintln!(
+            "{}",
+            "Cannot update since config changed. Need manual merge".yellow()
+        );
+        eprintln!("");
+        let old_config = toml::to_string(&old_config).unwrap();
+        let new_config = toml::to_string(&new_config).unwrap();
+        for diff in diff::lines(&old_config, &new_config) {
+            match diff {
+                diff::Result::Left(l) => println!("-{}", l.red()),
+                diff::Result::Both(l, _) => println!(" {}", l),
+                diff::Result::Right(r) => println!("+{}", r.green()),
             }
-            std::process::exit(1);
         }
-    } else {
-        eprintln!("{}{}", "Could not find module".red(), plugin_name.red().bold());
         std::process::exit(1);
     }
 
@@ -311,6 +306,20 @@ fn update(git_repo: &str, plugin_name: &str) {
     let mut mustache_map_builder = MapBuilder::new();
     if let Some(placeholders) = toml.placeholders.as_mut() {
         for placeholder in placeholders.iter_mut() {
+            if let EntryType::Array(arr) = placeholder.1 {
+                let mut prompt = ConfirmPrompt::new(format!("Add new elements [{}]? ", placeholder.0));
+                match task::block_on(async { prompt.run().await }) {
+                    Ok(Some(true)) => {
+                        //we need to insert a new "proto type" since the first element gets poped
+                        if let EntryType::Array(element)= old_config.placeholders.as_ref().unwrap().get(placeholder.0).unwrap() {
+                            let element = element.first().unwrap().clone();
+                            arr.insert(0, element);
+                            mustache_map_builder = read_array(placeholder.0, arr, mustache_map_builder);
+                        }
+                    },
+                    _ => {},
+                }
+            }
             mustache_map_builder = mustache_map_builder
                 .insert(placeholder.0, &placeholder.1)
                 .expect("Could not parse object");
@@ -450,7 +459,7 @@ fn get_short_names(array : &Vec<EntryType>) -> String {
 }
 
 fn read_array(key: &str, array: &mut Vec<EntryType>, mut map_builder : MapBuilder) -> MapBuilder {
-    let proto_type: EntryType = array.pop().expect("We need a prototype");
+    let proto_type: EntryType = array.remove(0);
     loop {
         let mut object = proto_type.clone();
         map_builder = read(key, &mut object, map_builder);
