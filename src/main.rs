@@ -255,6 +255,10 @@ fn update(git_repo: &str, plugin_name: &str) {
         std::process::exit(1);
     }
     let path_to_module = Path::new(git_repo).join(plugin_name);
+    if !path_to_module.exists() {
+        eprintln!("{}", "Could not find module in the git repo. Did you execute `git pull`?".red());
+        std::process::exit(1);
+    }
     let mustache = mustache::compile_path(path_to_module.join("template.sh"))
         .expect("Could not parse mustache template");
 
@@ -281,6 +285,9 @@ fn update(git_repo: &str, plugin_name: &str) {
             }
             std::process::exit(1);
         }
+    } else {
+        eprintln!("{}{}", "Could not find module".red(), plugin_name.red().bold());
+        std::process::exit(1);
     }
 
     if let Some(internal_deps) = toml.plugin_info.internal_dependencies.as_mut() {
@@ -313,7 +320,8 @@ fn update(git_repo: &str, plugin_name: &str) {
 fn remove(plugin_name: &str) {
     let home_path = HOME.join(plugin_name);
     if !home_path.exists() {
-        return;
+        eprintln!("{}{}", "Could not find installed module ".red(), plugin_name);
+        std::process::exit(1);
     }
     std::fs::remove_dir_all(home_path).expect("Could not remove directory");
 }
@@ -324,6 +332,10 @@ fn install(git_repo: &str, plugin_name: &str) {
         return;
     }
     let path_to_module = Path::new(git_repo).join(plugin_name);
+    if !path_to_module.exists() {
+        eprintln!("{}", "Could not find module in the git repo. Did you execute `git pull`?".red());
+        std::process::exit(1);
+    }
     let mustache = mustache::compile_path(path_to_module.join("template.sh"))
         .expect("Could not parse mustache template");
 
