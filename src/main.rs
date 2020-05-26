@@ -25,6 +25,9 @@ lazy_static!{
         if config_dir.exists() {
             res = toml::from_str(&std::fs::read_to_string(config_dir).expect("Could not find global config")).expect("cannot parse config");
         } else {
+            if !HOME.join(CONFIG_DIR).exists() {
+                std::fs::create_dir_all(HOME.join(CONFIG_DIR)).expect("Could not create config dir");
+            }
             res = GlobalConfig {
                 config_path: config_dir,
                 git_repo: String::from("")
