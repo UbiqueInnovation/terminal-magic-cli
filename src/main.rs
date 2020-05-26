@@ -423,6 +423,8 @@ fn read_value(key: &str, str: &mut String){
         Ok(Some(s)) => {
             if !s.is_empty() {
                 *str = shellexpand::tilde(&s).to_string();
+            } else {
+                *str = shellexpand::tilde(&str).to_string();
             }
         }
         _ => std::process::exit(1),
