@@ -317,6 +317,10 @@ fn update(git_repo: &str, plugin_name: &str) {
                             mustache_map_builder = read_array(placeholder.0, arr, mustache_map_builder);
                         }
                     },
+                    Ok(Some(false)) => {
+                        let name = get_short_names(arr);
+                        mustache_map_builder = mustache_map_builder.insert_str(format!("{}_shortNames", placeholder.0), name);
+                    } 
                     _ => {},
                 }
             }
