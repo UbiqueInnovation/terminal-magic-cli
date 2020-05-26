@@ -422,7 +422,7 @@ fn read_value(key: &str, str: &mut String){
     match task::block_on(async { prompt.run().await }) {
         Ok(Some(s)) => {
             if !s.is_empty() {
-                *str = s
+                *str = shellexpand::tilde(&s).to_string();
             }
         }
         _ => std::process::exit(1),
