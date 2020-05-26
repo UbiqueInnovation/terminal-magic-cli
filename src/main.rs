@@ -333,7 +333,7 @@ fn install(git_repo: &str, plugin_name: &str) {
     if let Some(placeholders) = toml.placeholders.as_mut() {
         for mut placeholder in placeholders.iter_mut() {
             println!("Read {}", placeholder.0);
-            read(&placeholder.0, &mut placeholder.1);
+            mustache_map_builder = read(&placeholder.0, &mut placeholder.1, mustache_map_builder);
             mustache_map_builder = mustache_map_builder
                 .insert(placeholder.0, &placeholder.1)
                 .expect("Could not parse object");
@@ -377,21 +377,22 @@ fn render(
     }
 }
 
-fn read(key: &str, entry_type: &mut EntryType) {
+fn read(key: &str, entry_type: &mut EntryType, mut map_builder : MapBuilder) -> MapBuilder{
     match entry_type {
         EntryType::Value(str) => {
             read_value(key, str);
         }
         EntryType::Array(array) => {
-            read_array(key, array);
+            map_builder = read_array(key, array, map_builder);
         }
         EntryType::Object(obj) => {
-            read_object(obj);
+            map_builder = read_object(obj, map_builder);
         }
     }
+    map_builder
 }
 
-fn read_value(key: &str, str: &mut String) {
+fn read_value(key: &str, str: &mut String){
     let mut prompt = TextPrompt::new(format!("{} [{}]? ", key, str));
     match task::block_on(async { prompt.run().await }) {
         Ok(Some(s)) => {
@@ -403,11 +404,27 @@ fn read_value(key: &str, str: &mut String) {
     }
 }
 
-fn read_array(key: &str, array: &mut Vec<EntryType>) {
+fn get_short_names(array : &Vec<EntryType>) -> String {
+    let mut short_names : Vec<String> = vec![];
+    for entry in array {
+        if let EntryType::Object(obj) = entry {
+            if obj.contains_key("shortName") {
+                if let Some(EntryType::Value(short_name)) = obj.get("shortName") {
+                    short_names.push(short_name.clone());
+                }
+                
+            }
+        }
+    }
+    short_names.join(" ")
+}
+
+fn read_array(key: &str, array: &mut Vec<EntryType>, mut map_builder : MapBuilder) -> MapBuilder {
     let proto_type: EntryType = array.pop().expect("We need a prototype");
     loop {
         let mut object = proto_type.clone();
-        read(key, &mut object);
+        map_builder = read(key, &mut object, map_builder);
+        
         array.push(object);
         let mut prompt = ConfirmPrompt::new(format!("Another one? "));
         match task::block_on(async { prompt.run().await }) {
@@ -415,12 +432,16 @@ fn read_array(key: &str, array: &mut Vec<EntryType>) {
             _ => break,
         }
     }
+    let name = get_short_names(array);
+    map_builder = map_builder.insert_str(format!("{}_shortNames", key), name);
+    map_builder
 }
 
-fn read_object(obj: &mut IndexMap<String, EntryType>) {
+fn read_object(obj: &mut IndexMap<String, EntryType>, mut map_builder : MapBuilder) -> MapBuilder {
     for mut keys in obj.iter_mut() {
-        read(keys.0, &mut keys.1);
+        map_builder = read(keys.0, &mut keys.1, map_builder);
     }
+    map_builder
 }
 
 #[derive(Deserialize, Serialize, Debug, PartialEq)]
