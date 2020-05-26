@@ -63,14 +63,18 @@ fn main() {
 
                     if let Ok(installed_modules) = get_list_of_installed_modules(&HOME, &HOME.to_string_lossy()) {
                         let config : PluginInfo;
+                        let mut installed = false;
                         if installed_modules.contains(&String::from(module_path.to_string_lossy())) {
                             config = read_config(&(base.join("config.toml"))).expect("No config for module found");
+                            installed = true;
                         } else {
                             config = read_config(&Path::new(&git_repo).join(module).join("config.toml")).expect("Cannot find module");
                         }
                             println!("Module {}", module.green());
                             println!("Author: {}", config.plugin_info.author.green());
-                            println!("Installed Version: {}", config.plugin_info.version.green());
+                            if installed {
+                                println!("Installed Version: {}", config.plugin_info.version.green());
+                            }
                             println!("");
                             if let Some(help) = config.plugin_info.help {
                                 println!("{}", help.yellow());
