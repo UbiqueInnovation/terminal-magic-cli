@@ -10,10 +10,10 @@ use dirs::home_dir;
 use mustache::MapBuilder;
 use prompts::{confirm::ConfirmPrompt, text::TextPrompt, Prompt};
 use serde_derive::{Deserialize, Serialize};
-use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use toml;
 use std::sync::Mutex;
+use indexmap::IndexMap;
 
 static CONFIG_DIR: &str = ".terminal-magic";
 
@@ -417,7 +417,7 @@ fn read_array(key: &str, array: &mut Vec<EntryType>) {
     }
 }
 
-fn read_object(obj: &mut BTreeMap<String, EntryType>) {
+fn read_object(obj: &mut IndexMap<String, EntryType>) {
     for mut keys in obj.iter_mut() {
         read(keys.0, &mut keys.1);
     }
@@ -426,7 +426,7 @@ fn read_object(obj: &mut BTreeMap<String, EntryType>) {
 #[derive(Deserialize, Serialize, Debug, PartialEq)]
 struct PluginInfo {
     plugin_info: Package,
-    placeholders: Option<BTreeMap<String, EntryType>>,
+    placeholders: Option<IndexMap<String, EntryType>>,
 }
 
 #[derive(Deserialize, Serialize, Debug, PartialEq)]
@@ -445,11 +445,11 @@ enum PluginType {
     Script(String),
 }
 
-#[derive(Deserialize, Serialize, Clone, Debug, PartialEq, PartialOrd)]
+#[derive(Deserialize, Serialize, Clone, Debug, PartialEq)]
 #[serde(untagged)]
 enum EntryType {
     Value(String),
-    Object(BTreeMap<String, EntryType>),
+    Object(IndexMap<String, EntryType>),
     Array(Vec<EntryType>),
 }
 
