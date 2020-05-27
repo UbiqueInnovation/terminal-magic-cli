@@ -86,15 +86,15 @@ fn main() {
         }
         std::process::exit(0);
     }
-    match update_modules() {
-        Err(e) => {
-            eprintln!("{}{:?}", "Could not update repo".red(), e);
-        },
-        _ => {}
-    }
    
     match matches.subcommand_name() {
         Some("list") => {
+            match update_modules() {
+                Err(e) => {
+                    eprintln!("{}{:?}", "Could not update repo".red(), e);
+                },
+                _ => {}
+            }
             if let Some(sub_matches) = matches.subcommand_matches("list") {
                 if sub_matches.is_present("INPUT") {
                     let module = sub_matches.value_of("INPUT").unwrap();
