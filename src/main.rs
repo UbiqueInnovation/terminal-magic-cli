@@ -30,7 +30,8 @@ lazy_static!{
             }
             res = GlobalConfig {
                 config_path: config_dir,
-                git_repo: String::from("")
+                git_repo: String::from(""),
+                ssh_key : None
             };
             if res.save().is_err() {
                 eprintln!("{}", "Could not write config".red());
@@ -85,8 +86,11 @@ fn main() {
         }
         std::process::exit(0);
     }
-    if update_modules().is_err() {
-        eprintln!("{}", "Could not update repo".red());
+    match update_modules() {
+        Err(e) => {
+            eprintln!("{}{:?}", "Could not update repo".red(), e);
+        },
+        _ => {}
     }
    
     match matches.subcommand_name() {
@@ -520,12 +524,16 @@ fn read_object(obj: &mut IndexMap<String, EntryType>, mut map_builder : MapBuild
     map_builder
 }
 
-use git2::{Repository, Error, Cred, RemoteCallbacks};
+
+//GIT Section
+use git2::{Repository, Error, Cred, RemoteCallbacks,Commit, ObjectType};
+
 fn check_out_modules_with_key(remote : &str, ssh_key : &Path) -> Result<(), Error> {
     let mut callbacks = RemoteCallbacks::new();
     callbacks.credentials(|_url, username_from_url, _allowed_tyeps| {
         Cred::ssh_key(username_from_url.unwrap(), None, ssh_key, None)
     });
+    GLOBAL_CONFIG.lock().unwrap().ssh_key = Some(String::from(ssh_key.to_string_lossy()));
     check_out(remote, callbacks)?;
     Ok(())
 }
@@ -577,9 +585,33 @@ fn check_out(remote : &str, callbacks : RemoteCallbacks) -> Result<(), Error> {
 
 fn update_modules() -> Result<(), Error> {
     let config = GLOBAL_CONFIG.lock().unwrap();
+    let mut fo = git2::FetchOptions::new();
+    if let Some(key) = config.ssh_key.clone() {
+        let mut callbacks = RemoteCallbacks::new();
+        callbacks.credentials(move |_url, username_from_url, _allowed_tyeps| {
+            Cred::ssh_key(username_from_url.unwrap(), None, Path::new(&shellexpand::tilde(&key).to_string()), None)
+        });
+        fo.remote_callbacks(callbacks);
+    } else {
+            let mut prompt = TextPrompt::new("Git password: ").with_style(prompts::text::Style::Password);
+            let pw : String = match task::block_on(async {prompt.run().await}) {
+                Ok(Some(pw)) => pw,
+                _ => String::from("")
+            };
+            let mut callbacks = RemoteCallbacks::new();
+            callbacks.credentials(|_url, username_from_url, _allowed_tyeps| {
+            if let Some(user_name) = username_from_url {
+                Cred::userpass_plaintext(user_name, &pw)
+            }
+            else {
+                Cred::username("")
+            }
+        });
+    }
     match Repository::open(shellexpand::tilde(&config.git_repo).to_string()) {
         Ok(repo) => {
-            repo.checkout_head(Option::None)?;
+            fetch_origin_master(&repo, fo)?;
+            fast_forward(&repo)?;
             println!("{}", "Updated repo to newest revision".green());
         },
         Err(e) => {
@@ -588,6 +620,34 @@ fn update_modules() -> Result<(), Error> {
     }
     Ok(())
 }
+
+fn fetch_origin_master(repo: &git2::Repository, mut opts: git2::FetchOptions) -> Result<(), git2::Error> {
+    repo.find_remote("origin")?.fetch(&["master"], Some(&mut opts), None)
+}
+
+fn fast_forward(repo : &Repository) -> Result<(), Error> {
+    let fetch_head = repo.find_reference("FETCH_HEAD")?;
+    let fetch_commit = repo.reference_to_annotated_commit(&fetch_head)?;
+    let analysis = repo.merge_analysis(&[&fetch_commit])?;
+    if analysis.0.is_up_to_date() {
+        Ok(())
+    } else if analysis.0.is_fast_forward() {
+        let refname = format!("refs/heads/{}", "master");
+        let mut reference = repo.find_reference(&refname)?;
+        reference.set_target(fetch_commit.id(), "Fast-Forward")?;
+        repo.set_head(&refname)?;
+        repo.checkout_head(Some(git2::build::CheckoutBuilder::default().force()))
+    } else {
+        Err(Error::from_str("Fast-forward only!"))
+    }
+}
+pub fn find_last_commit(repo: &Repository) -> Result<Commit, git2::Error> {
+    let obj = repo.head()?.resolve()?.peel(ObjectType::Commit)?;
+    match obj.into_commit() {
+        Ok(c) => Ok(c),
+        Err(_) => Err(Error::from_str("commit error")),
+    }
+} 
 
 #[derive(Deserialize, Serialize, Debug, PartialEq)]
 struct PluginInfo {
@@ -631,7 +691,8 @@ impl std::fmt::Display for EntryType {
 #[derive(Deserialize, Serialize, Debug, PartialEq)]
 struct GlobalConfig {
     config_path : PathBuf,
-    git_repo : String
+    git_repo : String,
+    ssh_key : Option<String>
 }
 
 impl GlobalConfig {
