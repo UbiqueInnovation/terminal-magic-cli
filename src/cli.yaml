@@ -9,6 +9,18 @@ args:
       required: false
       help: specify the git repo (on disk), where the plugins are found
       takes_value: true
+  - clone:
+      short: c
+      long: clone
+      required: false
+      help: Clone modules from specified url (with username)
+      takes_value: true
+  - ssh_key:
+      short: s
+      long: ssh_key
+      required: false
+      help:  Ssh key to clone repository
+      takes_value: true
 subcommands:
   - install:
       about: Install new extension. Use path from Git Repo as name

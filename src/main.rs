@@ -42,6 +42,36 @@ fn main() {
     let app = App::from_yaml(yaml);
     let matches = app.get_matches();
     let git_repo : String;
+    if matches.is_present("clone") {
+        let clone_url = matches.value_of("clone").unwrap();
+        if matches.is_present("ssh_key") {
+            let ssh_key = Path::new(matches.value_of("ssh_key").unwrap());
+            println!("{}{}", "Using key ".green(), ssh_key.to_string_lossy());
+            match check_out_modules_with_key(clone_url, &ssh_key) {
+                Ok(_) => {
+                    println!("{}{}{}", "Clone repsitory from ".yellow(), clone_url.blue(), " successfully".yellow());
+                },
+                Err(e) => {
+                    eprintln!("{}{:?}", "Could not clone module: ".red(), e);
+                    std::process::exit(1);
+                }
+            }
+        } else {
+            match check_out_modules_with_pw(clone_url) {
+                Ok(_) => {
+                    println!("{}{}{}", "Clone repsitory from ".yellow(), clone_url.blue(), " successfully".yellow());
+                },
+                Err(_) => {
+                    eprintln!("{}", "Could not clone module".red());
+                    std::process::exit(1);
+                }
+            }
+        }
+        std::process::exit(0);
+    }
+    if update_modules().is_err() {
+        eprintln!("{}", "Could not update repo".red());
+    }
     {
         let mut glob_conf = GLOBAL_CONFIG.lock().unwrap();
         if matches.is_present("git_repo") {
@@ -485,6 +515,72 @@ fn read_object(obj: &mut IndexMap<String, EntryType>, mut map_builder : MapBuild
         map_builder = read(keys.0, &mut keys.1, map_builder);
     }
     map_builder
+}
+
+use git2::{Repository, Error, Cred, RemoteCallbacks};
+fn check_out_modules_with_key(remote : &str, ssh_key : &Path) -> Result<(), Error> {
+    let mut callbacks = RemoteCallbacks::new();
+    callbacks.credentials(|_url, username_from_url, _allowed_tyeps| {
+        Cred::ssh_key(username_from_url.unwrap(), None, ssh_key, None)
+    });
+    check_out(remote, callbacks)?;
+    Ok(())
+}
+
+fn check_out_modules_with_pw(remote : &str) -> Result<(), Error> {
+    
+    let mut prompt = TextPrompt::new("Git password: ").with_style(prompts::text::Style::Password);
+    let pw : String = match task::block_on(async {prompt.run().await}) {
+        Ok(Some(pw)) => pw,
+        _ => String::from("")
+    };
+    let mut callbacks = RemoteCallbacks::new();
+    callbacks.credentials(|_url, username_from_url, _allowed_tyeps| {
+        if let Some(user_name) = username_from_url {
+            Cred::userpass_plaintext(user_name, &pw)
+        }
+        else {
+            Cred::username("")
+        }
+    });
+    check_out(remote, callbacks)?;
+    Ok(())
+}
+
+fn check_out(remote : &str, callbacks : RemoteCallbacks) -> Result<(), Error> {
+    let mut fo = git2::FetchOptions::new();
+    fo.remote_callbacks(callbacks);
+
+    let mut builder = git2::build::RepoBuilder::new();
+    builder.fetch_options(fo);
+
+    if !HOME.join("git_modules").exists() {
+        match std::fs::create_dir_all(HOME.join("git_modules")) {
+            Ok(_) => {},
+            Err(_) => {
+                eprintln!("Could not create git_modules");
+                std::process::exit(1);
+            }
+        }
+    }
+    builder.clone(remote, &HOME.join("git_modules"))?;
+    let mut config = GLOBAL_CONFIG.lock().unwrap();
+    config.git_repo = HOME.join("git_modules").to_string_lossy().to_string();
+    Ok(())
+}
+
+fn update_modules() -> Result<(), Error> {
+    let config = GLOBAL_CONFIG.lock().unwrap();
+    match Repository::open(shellexpand::tilde(&config.git_repo).to_string()) {
+        Ok(repo) => {
+            repo.checkout_head(Option::None)?;
+            println!("{}", "Updated repo to newest revision".green());
+        },
+        Err(e) => {
+            eprintln!("Could not update repo, manual update needed: {:?}", e);
+        }
+    }
+    Ok(())
 }
 
 #[derive(Deserialize, Serialize, Debug, PartialEq)]
