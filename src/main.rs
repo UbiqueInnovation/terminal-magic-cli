@@ -32,6 +32,7 @@ lazy_static!{
                 config_path: config_dir,
                 git_repo: String::from("")
             };
+            res.save();
         }
         Mutex::new(res)
     };
@@ -42,6 +43,19 @@ fn main() {
     let app = App::from_yaml(yaml);
     let matches = app.get_matches();
     let git_repo : String;
+    {
+        let mut glob_conf = GLOBAL_CONFIG.lock().unwrap();
+        if matches.is_present("git_repo") {
+            git_repo = String::from(matches.value_of("git_repo").unwrap());
+        
+            glob_conf.git_repo = shellexpand::tilde(&git_repo.clone()).to_string();
+            glob_conf.save().expect("Could not save global config");
+        } else {
+            git_repo = shellexpand::tilde(&glob_conf.git_repo.clone()).to_string();
+        }
+        println!("Module Git Repo: {}", git_repo.green());
+        println!("");
+    }
     if matches.is_present("clone") {
         let clone_url = matches.value_of("clone").unwrap();
         if matches.is_present("ssh_key") {
@@ -71,19 +85,6 @@ fn main() {
     }
     if update_modules().is_err() {
         eprintln!("{}", "Could not update repo".red());
-    }
-    {
-        let mut glob_conf = GLOBAL_CONFIG.lock().unwrap();
-        if matches.is_present("git_repo") {
-            git_repo = String::from(matches.value_of("git_repo").unwrap());
-        
-            glob_conf.git_repo = shellexpand::tilde(&git_repo.clone()).to_string();
-            glob_conf.save().expect("Could not save global config");
-        } else {
-            git_repo = shellexpand::tilde(&glob_conf.git_repo.clone()).to_string();
-        }
-        println!("Module Git Repo: {}", git_repo.green());
-        println!("");
     }
    
     match matches.subcommand_name() {
@@ -566,6 +567,7 @@ fn check_out(remote : &str, callbacks : RemoteCallbacks) -> Result<(), Error> {
     builder.clone(remote, &HOME.join("git_modules"))?;
     let mut config = GLOBAL_CONFIG.lock().unwrap();
     config.git_repo = HOME.join("git_modules").to_string_lossy().to_string();
+    config.save();
     Ok(())
 }
 
