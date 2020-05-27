@@ -18,7 +18,7 @@ use indexmap::IndexMap;
 static CONFIG_DIR: &str = ".terminal-magic";
 
 lazy_static!{
-    static ref HOME : PathBuf = { home_dir().expect("Could not find HOME").join(CONFIG_DIR) };
+    static ref HOME : PathBuf = home_dir().expect("Could not find HOME").join(CONFIG_DIR);
     static ref GLOBAL_CONFIG : Mutex<GlobalConfig> = { 
         let config_dir = home_dir().expect("Could not find HOME").join(CONFIG_DIR).join("global_config.toml");
         let res : GlobalConfig;
@@ -32,7 +32,9 @@ lazy_static!{
                 config_path: config_dir,
                 git_repo: String::from("")
             };
-            res.save();
+            if res.save().is_err() {
+                eprintln!("{}", "Could not write config".red());
+            }
         }
         Mutex::new(res)
     };
@@ -567,7 +569,9 @@ fn check_out(remote : &str, callbacks : RemoteCallbacks) -> Result<(), Error> {
     builder.clone(remote, &HOME.join("git_modules"))?;
     let mut config = GLOBAL_CONFIG.lock().unwrap();
     config.git_repo = HOME.join("git_modules").to_string_lossy().to_string();
-    config.save();
+    if config.save().is_err() {
+        eprintln!("{}","Could not write config".red());
+    }
     Ok(())
 }
 
