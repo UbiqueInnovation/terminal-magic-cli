@@ -129,6 +129,9 @@ fn main() {
                                     print!("{}", &re_match["content"].color(&re_match["color"]));
                                     cursor = re_match.get(0).unwrap().end();
                                 }
+                                if cursor <  help.len()-1 {
+                                    print!("{}", &help[cursor..])
+                                }
                                 println!("");
                             }
                             
