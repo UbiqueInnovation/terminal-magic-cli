@@ -103,9 +103,11 @@ fn main() {
 
                     if let Ok(installed_modules) = get_list_of_installed_modules(&HOME, &HOME.to_string_lossy()) {
                         let config : PluginInfo;
+                        let mut updated_config : Option<PluginInfo> = None;
                         let mut installed = false;
                         if installed_modules.contains(&String::from(module_path.to_string_lossy())) {
                             config = read_config(&(base.join("config.toml"))).expect("No config for module found");
+                            updated_config = Some(read_config(&Path::new(&git_repo).join(module).join("config.toml")).expect("Cannot find module"));
                             installed = true;
                         } else {
                             config = read_config(&Path::new(&git_repo).join(module).join("config.toml")).expect("Cannot find module");
@@ -113,8 +115,10 @@ fn main() {
                             println!("Module {}", module.green());
                             println!("Author: {}", config.plugin_info.author.green());
                             if installed {
-                                println!("Installed Version: {}", config.plugin_info.version.green());
+                                let new_version = updated_config.unwrap().plugin_info.version;
+                                println!("Installed Version (Repo Version): {} ({}) ", config.plugin_info.version.green(), new_version.green());
                             }
+                        
                             println!("");
                             if let Some(help) = config.plugin_info.help {
                                 println!("{}", help.yellow());
@@ -138,8 +142,6 @@ fn main() {
                             if let Some(placeholders) = &config.placeholders {
                                 print!("{}", format!("{:?}",placeholders).green());
                             }
-                           
-                        
                     }
                     std::process::exit(0);
                 }
@@ -288,6 +290,14 @@ fn update_source_file() -> std::io::Result<()> {
     Ok(())
 }
 
+fn booleanPrompt(prompt_string : &str) -> bool {
+    let mut prompt = ConfirmPrompt::new(format!("{}",prompt_string));
+    match task::block_on(async { prompt.run().await }) {
+        Ok(Some(val)) => val,
+        _ =>  std::process::exit(1)
+    }
+}
+
 fn update(git_repo: &str, plugin_name: &str) {
     let home_path = HOME.join(plugin_name);
     if !home_path.exists() {
@@ -308,21 +318,19 @@ fn update(git_repo: &str, plugin_name: &str) {
             read_config(&path_to_module.join("config.toml")).expect("module config not found");
 
     if old_config != new_config {
-        eprintln!(
+        println!(
             "{}",
-            "Cannot update since config changed. Need manual merge".yellow()
+            "Config changed check the changes".yellow()
+            
         );
-        eprintln!("");
-        let old_config = toml::to_string(&old_config).unwrap();
-        let new_config = toml::to_string(&new_config).unwrap();
-        for diff in diff::lines(&old_config, &new_config) {
-            match diff {
-                diff::Result::Left(l) => println!("-{}", l.red()),
-                diff::Result::Both(l, _) => println!(" {}", l),
-                diff::Result::Right(r) => println!("+{}", r.green()),
-            }
+
+        let old_config_str = toml::to_string(&old_config).unwrap();
+        let new_config_str = toml::to_string(&new_config).unwrap();
+        print_diff(&old_config_str, &new_config_str);
+        if old_config.placeholders != new_config.placeholders {
+            eprintln!("{}", "Placeholders are different, cannot merge yet data files. Abort!".red());
+            std::process::exit(1);
         }
-        std::process::exit(1);
     }
 
     if let Some(internal_deps) = toml.plugin_info.internal_dependencies.as_mut() {
@@ -344,21 +352,15 @@ fn update(git_repo: &str, plugin_name: &str) {
     if let Some(placeholders) = toml.placeholders.as_mut() {
         for placeholder in placeholders.iter_mut() {
             if let EntryType::Array(arr) = placeholder.1 {
-                let mut prompt = ConfirmPrompt::new(format!("Add new elements [{}]? ", placeholder.0));
-                match task::block_on(async { prompt.run().await }) {
-                    Ok(Some(true)) => {
-                        //we need to insert a new "proto type" since the first element gets poped
-                        if let EntryType::Array(element)= old_config.placeholders.as_ref().unwrap().get(placeholder.0).unwrap() {
-                            let element = element.first().unwrap().clone();
-                            arr.insert(0, element);
-                            mustache_map_builder = read_array(placeholder.0, arr, mustache_map_builder);
-                        }
-                    },
-                    Ok(Some(false)) => {
-                        let name = get_short_names(arr);
-                        mustache_map_builder = mustache_map_builder.insert_str(format!("{}_shortNames", placeholder.0), name);
-                    } 
-                    _ => {},
+                if booleanPrompt(&format!("Add new elements [{}]? ", placeholder.0)) {
+                    if let EntryType::Array(element)= old_config.placeholders.as_ref().unwrap().get(placeholder.0).unwrap() {
+                        let element = element.first().unwrap().clone();
+                        arr.insert(0, element);
+                        mustache_map_builder = read_array(placeholder.0, arr, mustache_map_builder);
+                    }
+                } else {
+                    let name = get_short_names(arr);
+                    mustache_map_builder = mustache_map_builder.insert_str(format!("{}_shortNames", placeholder.0), name);
                 }
             }
             mustache_map_builder = mustache_map_builder
@@ -367,7 +369,25 @@ fn update(git_repo: &str, plugin_name: &str) {
         }
     }
     let mustache_map = mustache_map_builder.build();
-    render(toml, mustache, mustache_map, plugin_name, &path_to_module);
+    let script = render(mustache, mustache_map);
+    let old_script = get_old_script(plugin_name, &path_to_module);
+
+    print_diff(&old_script, &script);
+
+    if !booleanPrompt("Update?") {
+        std::process::exit(1);
+    }
+    write_file(toml, script, plugin_name, &path_to_module);
+}
+
+fn print_diff(left : &str, right : &str){
+    for diff in diff::lines(&left, &right) {
+        match diff {
+            diff::Result::Left(l) => println!("-{}", l.red()),
+            diff::Result::Both(l, _) => println!(" {}", l),
+            diff::Result::Right(r) => println!("+{}", r.green()),
+        }
+    }
 }
 
 fn remove(plugin_name: &str) {
@@ -418,16 +438,16 @@ fn install(git_repo: &str, plugin_name: &str) {
         }
     }
     let mustache_map = mustache_map_builder.build();
-    render(toml, mustache, mustache_map, plugin_name, &path_to_module);
+    let script = render(mustache, mustache_map);
+    write_file(toml, script, plugin_name, &path_to_module);
 }
 
-fn render(
-    toml: PluginInfo,
-    mustache: mustache::Template,
-    mustache_map: mustache::Data,
-    plugin_name: &str,
-    path_to_module: &Path,
-) {
+fn get_old_script(plugin_name : &str, path_to_module : &Path) -> String {
+    let home_path = HOME.join(plugin_name);
+    std::fs::read_to_string(home_path.join("script.sh")).expect("Old script was not existent")
+}
+
+fn write_file(toml: PluginInfo,script : String, plugin_name : &str, path_to_module : &Path) {
     let home_path = HOME.join(plugin_name);
     if let Ok(_) = std::fs::create_dir_all(&home_path) {
         println!("Created directory");
@@ -435,14 +455,12 @@ fn render(
     if let Ok(_) = std::fs::remove_file(home_path.join("script.sh")) {
         println!("script.sh already existed");
     }
-
     if let Ok(_) = std::fs::copy(
         path_to_module.join("config.toml"),
         home_path.join("config.toml"),
     ) {}
-    let mut script_file =
-        std::fs::File::create(home_path.join("script.sh")).expect("Could not create file");
-    if let Ok(_) = mustache.render_data(&mut script_file, &mustache_map) {
+   
+    if let Ok(_) =  std::fs::write(home_path.join("script.sh"), script){
         if let Ok(_) = std::fs::remove_file(home_path.join("data.toml")) {
             println!("data.toml File existed");
         }
@@ -453,6 +471,13 @@ fn render(
             println!("Successfully wrote plugin {}!", plugin_name);
         }
     }
+}
+
+fn render(
+    mustache: mustache::Template,
+    mustache_map: mustache::Data
+) -> String {
+    mustache.render_data_to_string(&mustache_map).expect("Could not render mustache template")
 }
 
 fn read(key: &str, entry_type: &mut EntryType, mut map_builder : MapBuilder) -> MapBuilder{
