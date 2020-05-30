@@ -14,6 +14,7 @@ use std::path::{Path, PathBuf};
 use toml;
 use std::sync::Mutex;
 use indexmap::IndexMap;
+use regex::Regex;
 
 static CONFIG_DIR: &str = ".terminal-magic";
 
@@ -121,7 +122,13 @@ fn main() {
                         
                             println!("");
                             if let Some(help) = config.plugin_info.help {
-                                println!("{}", help.yellow());
+                                let re = Regex::new(r"`(?P<color>[a-z]*)\s(?P<content>[\s\S]*?)\s*`").unwrap();
+                                let mut cursor = 0;
+                                for re_match in re.captures_iter(&help) {
+                                    print!("{}", &help[cursor..re_match.get(0).unwrap().start()]);
+                                    print!("{}", &re_match["content"].color(&re_match["color"]));
+                                    cursor = re_match.get(0).unwrap().end();
+                                }
                                 println!("");
                             }
                             
@@ -226,15 +233,20 @@ fn read_dir(dir: &Path, base: &str) -> std::io::Result<()> {
                 let mut installed = "";
                 let mut version = String::from("");
                 let module_path = HOME.join(module);
+                let mut repo_version = String::from("");
                 if module_path.exists() {
                     module_str = module.to_string_lossy().blue();
                     let toml = read_config(&module_path.join("config.toml"))?;
+                    let new_toml = read_config(&dir.join("config.toml")).unwrap();
                     version = toml.plugin_info.version.clone();
                     installed = "(installed)";
+                    if version != new_toml.plugin_info.version {
+                        repo_version = format!(" ({}) ", new_toml.plugin_info.version);
+                    }
                 } else {
                     module_str = module.to_string_lossy().green();
                 }
-                println!("{} {} {}", module_str, version.blue(), installed.blue());
+                println!("{} {}{} {}", module_str, version.blue(), repo_version.yellow(), installed.blue());
             }
         }
     }
@@ -384,7 +396,7 @@ fn print_diff(left : &str, right : &str){
     for diff in diff::lines(&left, &right) {
         match diff {
             diff::Result::Left(l) => println!("-{}", l.red()),
-            diff::Result::Both(l, _) => println!(" {}", l),
+            diff::Result::Both(l, _) => {},
             diff::Result::Right(r) => println!("+{}", r.green()),
         }
     }
