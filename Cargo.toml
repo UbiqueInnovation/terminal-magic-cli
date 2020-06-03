@@ -3,6 +3,11 @@ name = "terminal-magic"
 version = "0.2.0"
 authors = ["Systems @ Ubique <backend@ubique.ch>"]
 edition = "2018"
+description = "Package to organize shell extensions andd scripts"
+license = "Apache-2.0"
+repository = "https://github.com/Ubique-OSS/terminal-magic-cli"
+homepage = "https://github.com/Ubique-OSS/terminal-magic-cli"
+readme = "README.md"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
