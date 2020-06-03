@@ -7,9 +7,9 @@ plugin_type = "zsh"
 _short_string = "test"
 
 [[placeholders.databases]]
-shortName = "adsad"
-dbPath = "warnWetter"
-containerName = "echo_balbal"
+shortName = "shortDatabase"
+dbPath = "/path/to/my/db"
+containerName = "test_container"
 port = "5432"
 
 
