@@ -1,7 +1,7 @@
 name: Terminal Magic
 version: "1.0"
 author: Systems Department @UbiqueCH
-about: Manage Ubique internal zsh stuff (aka Terminal Magic)
+about: Manage zsh stuff (aka Terminal Magic)
 args:
   - git_repo:
       short: g
