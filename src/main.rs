@@ -305,7 +305,7 @@ fn update_source_file() -> std::io::Result<()> {
     Ok(())
 }
 
-fn booleanPrompt(prompt_string : &str) -> bool {
+fn boolean_prompt(prompt_string : &str) -> bool {
     let mut prompt = ConfirmPrompt::new(format!("{}",prompt_string));
     match task::block_on(async { prompt.run().await }) {
         Ok(Some(val)) => val,
@@ -367,7 +367,7 @@ fn update(git_repo: &str, plugin_name: &str) {
     if let Some(placeholders) = toml.placeholders.as_mut() {
         for placeholder in placeholders.iter_mut() {
             if let EntryType::Array(arr) = placeholder.1 {
-                if booleanPrompt(&format!("Add new elements [{}]? ", placeholder.0)) {
+                if boolean_prompt(&format!("Add new elements [{}]? ", placeholder.0)) {
                     if let EntryType::Array(element)= old_config.placeholders.as_ref().unwrap().get(placeholder.0).unwrap() {
                         let element = element.first().unwrap().clone();
                         arr.insert(0, element);
@@ -385,11 +385,11 @@ fn update(git_repo: &str, plugin_name: &str) {
     }
     let mustache_map = mustache_map_builder.build();
     let script = render(mustache, mustache_map);
-    let old_script = get_old_script(plugin_name, &path_to_module);
+    let old_script = get_old_script(plugin_name);
 
     print_diff(&old_script, &script);
 
-    if !booleanPrompt("Update?") {
+    if !boolean_prompt("Update?") {
         std::process::exit(1);
     }
     write_file(toml, script, plugin_name, &path_to_module);
@@ -399,7 +399,7 @@ fn print_diff(left : &str, right : &str){
     for diff in diff::lines(&left, &right) {
         match diff {
             diff::Result::Left(l) => println!("-{}", l.red()),
-            diff::Result::Both(l, _) => {},
+            diff::Result::Both(_, _) => {},
             diff::Result::Right(r) => println!("+{}", r.green()),
         }
     }
@@ -457,7 +457,7 @@ fn install(git_repo: &str, plugin_name: &str) {
     write_file(toml, script, plugin_name, &path_to_module);
 }
 
-fn get_old_script(plugin_name : &str, path_to_module : &Path) -> String {
+fn get_old_script(plugin_name : &str) -> String {
     let home_path = HOME.join(plugin_name);
     std::fs::read_to_string(home_path.join("script.sh")).expect("Old script was not existent")
 }
@@ -639,7 +639,7 @@ fn update_modules() -> Result<(), Error> {
                 _ => String::from("")
             };
             let mut callbacks = RemoteCallbacks::new();
-            callbacks.credentials(|_url, username_from_url, _allowed_tyeps| {
+            callbacks.credentials(move |_url, username_from_url, _allowed_tyeps| {
             if let Some(user_name) = username_from_url {
                 Cred::userpass_plaintext(user_name, &pw)
             }
