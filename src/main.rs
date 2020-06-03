@@ -90,12 +90,6 @@ fn main() {
    
     match matches.subcommand_name() {
         Some("list") => {
-            match update_modules() {
-                Err(e) => {
-                    eprintln!("{}{:?}", "Could not update repo".red(), e);
-                },
-                _ => {}
-            }
             if let Some(sub_matches) = matches.subcommand_matches("list") {
                 if sub_matches.is_present("INPUT") {
                     let module = sub_matches.value_of("INPUT").unwrap();
@@ -154,6 +148,13 @@ fn main() {
                             }
                     }
                     std::process::exit(0);
+                } else {
+                    match update_modules() {
+                        Err(e) => {
+                            eprintln!("{}{:?}", "Could not update repo".red(), e);
+                        },
+                        _ => {}
+                    }
                 }
                 let path_to_module = Path::new(&git_repo);
                 if read_dir(path_to_module, &git_repo).is_err() {
