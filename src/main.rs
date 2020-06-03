@@ -647,6 +647,7 @@ fn update_modules() -> Result<(), Error> {
                 Cred::username("")
             }
         });
+        fo.remote_callbacks(callbacks);
     }
     match Repository::open(shellexpand::tilde(&config.git_repo).to_string()) {
         Ok(repo) => {
