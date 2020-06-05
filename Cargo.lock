@@ -1060,7 +1060,7 @@ dependencies = [
 
 [[package]]
 name = "terminal-magic"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "async-std",
  "clap",
