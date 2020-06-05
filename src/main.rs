@@ -32,7 +32,8 @@ lazy_static!{
             res = GlobalConfig {
                 config_path: config_dir,
                 git_repo: String::from(""),
-                ssh_key : None
+                ssh_key : None,
+                key_needs_pw : false
             };
             if res.save().is_err() {
                 eprintln!("{}", "Could not write config".red());
@@ -313,6 +314,28 @@ fn boolean_prompt(prompt_string : &str) -> bool {
         _ =>  std::process::exit(1)
     }
 }
+fn text_prompt(prompt_string : &str) -> Option<String>{
+    let mut prompt = TextPrompt::new(format!("{}", prompt_string));
+    match task::block_on(async  {prompt.run().await}) {
+        Ok(val) => { 
+            val
+        },
+        _ => { 
+            None
+        }
+    }
+}
+fn password_prompt(prompt_string : &str) -> Option<String>{
+    let mut prompt = TextPrompt::new(format!("{}", prompt_string)).with_style(prompts::text::Style::Password);
+    match task::block_on(async  {prompt.run().await}) {
+        Ok(val) => { 
+            val
+        },
+        _ => { 
+            None
+        }
+    }
+}
 
 fn update(git_repo: &str, plugin_name: &str) {
     let home_path = HOME.join(plugin_name);
@@ -569,32 +592,75 @@ fn read_object(obj: &mut IndexMap<String, EntryType>, mut map_builder : MapBuild
 //GIT Section
 use git2::{Repository, Error, Cred, RemoteCallbacks,Commit, ObjectType};
 
-fn check_out_modules_with_key(remote : &str, ssh_key : &Path) -> Result<(), Error> {
+fn get_callbacks<'a>(ssh_key : Option<PathBuf>, key_needs_pw : bool) -> RemoteCallbacks<'a>{
     let mut callbacks = RemoteCallbacks::new();
-    callbacks.credentials(|_url, username_from_url, _allowed_tyeps| {
-        Cred::ssh_key(username_from_url.unwrap(), None, ssh_key, None)
+    callbacks.credentials(move |_url , username_from_url, allowed_types| {
+        let mut username = String::from("");
+        if let Some(name_from_url) = username_from_url {
+            username = String::from(name_from_url);
+        } else {
+            if let Some(user) = text_prompt("Git Username: ") {
+                username = user;
+            }
+        }
+        if allowed_types.is_user_pass_plaintext() {
+            if let Some(password) = password_prompt("Git Password: ") {
+                Cred::userpass_plaintext(&username, &password)
+            }
+            else {
+                Cred::default()
+            }
+        } else if allowed_types.is_ssh_key() {
+            if let Some(ssh_key) = &ssh_key {
+                if key_needs_pw {
+                    if let Some(key_pw) = password_prompt("SSH key password: ") {
+                        Cred::ssh_key(&username, None, &ssh_key, Some(&key_pw))
+                    } else {
+                        Cred::default()
+                    }
+                } else {
+                    Cred::ssh_key(&username, None,&ssh_key, None)
+                }
+            } else {
+                if let Some(key_path) = text_prompt("SSH Key Path: ") {
+                    let key_path = shellexpand::tilde( &key_path).to_string();
+                    GLOBAL_CONFIG.lock().unwrap().ssh_key = Some(key_path.clone());
+                    let key_path = Path::new(&key_path);
+                    let key_needs_pw = boolean_prompt("Is the key password protected? ");
+                    GLOBAL_CONFIG.lock().unwrap().key_needs_pw = key_needs_pw;
+                    if key_needs_pw {
+                        if let Some(key_pw) = password_prompt("SSH key password: ") {
+                            Cred::ssh_key(&username, None, key_path, Some(&key_pw))
+                        } else {
+                            Cred::default()
+                        }
+                    } else {
+                        Cred::ssh_key(&username, None,key_path, None)
+                    }
+                } else {
+                    Cred::default()
+                }
+            }
+        }
+        else {
+            Cred::default()
+        }
     });
+    callbacks
+}
+
+
+fn check_out_modules_with_key(remote : &str, ssh_key : &Path) -> Result<(), Error> {
+    let key_needs_pw = boolean_prompt("Does key need password? ");
+    GLOBAL_CONFIG.lock().unwrap().key_needs_pw = key_needs_pw;
     GLOBAL_CONFIG.lock().unwrap().ssh_key = Some(String::from(ssh_key.to_string_lossy()));
+    let callbacks = get_callbacks( Some(ssh_key.into()), false);
     check_out(remote, callbacks)?;
     Ok(())
 }
 
 fn check_out_modules_with_pw(remote : &str) -> Result<(), Error> {
-    
-    let mut prompt = TextPrompt::new("Git password: ").with_style(prompts::text::Style::Password);
-    let pw : String = match task::block_on(async {prompt.run().await}) {
-        Ok(Some(pw)) => pw,
-        _ => String::from("")
-    };
-    let mut callbacks = RemoteCallbacks::new();
-    callbacks.credentials(|_url, username_from_url, _allowed_tyeps| {
-        if let Some(user_name) = username_from_url {
-            Cred::userpass_plaintext(user_name, &pw)
-        }
-        else {
-            Cred::username("")
-        }
-    });
+    let callbacks = get_callbacks( None, false);
     check_out(remote, callbacks)?;
     Ok(())
 }
@@ -627,29 +693,13 @@ fn check_out(remote : &str, callbacks : RemoteCallbacks) -> Result<(), Error> {
 fn update_modules() -> Result<(), Error> {
     let config = GLOBAL_CONFIG.lock().unwrap();
     let mut fo = git2::FetchOptions::new();
+    let mut ssh_key : Option<PathBuf> = None;
     if let Some(key) = config.ssh_key.clone() {
-        let mut callbacks = RemoteCallbacks::new();
-        callbacks.credentials(move |_url, username_from_url, _allowed_tyeps| {
-            Cred::ssh_key(username_from_url.unwrap(), None, Path::new(&shellexpand::tilde(&key).to_string()), None)
-        });
-        fo.remote_callbacks(callbacks);
-    } else {
-            let mut prompt = TextPrompt::new("Git password: ").with_style(prompts::text::Style::Password);
-            let pw : String = match task::block_on(async {prompt.run().await}) {
-                Ok(Some(pw)) => pw,
-                _ => String::from("")
-            };
-            let mut callbacks = RemoteCallbacks::new();
-            callbacks.credentials(move |_url, username_from_url, _allowed_tyeps| {
-            if let Some(user_name) = username_from_url {
-                Cred::userpass_plaintext(user_name, &pw)
-            }
-            else {
-                Cred::username("")
-            }
-        });
-        fo.remote_callbacks(callbacks);
-    }
+       ssh_key = Some(Path::new(&key).into());
+    } 
+
+    let callbacks = get_callbacks(ssh_key, config.key_needs_pw);
+    fo.remote_callbacks(callbacks);
     match Repository::open(shellexpand::tilde(&config.git_repo).to_string()) {
         Ok(repo) => {
             fetch_origin_master(&repo, fo)?;
@@ -734,7 +784,9 @@ impl std::fmt::Display for EntryType {
 struct GlobalConfig {
     config_path : PathBuf,
     git_repo : String,
-    ssh_key : Option<String>
+    ssh_key : Option<String>,
+    #[serde(default)]
+    key_needs_pw : bool
 }
 
 impl GlobalConfig {
