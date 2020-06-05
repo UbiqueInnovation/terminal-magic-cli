@@ -13,7 +13,7 @@ Use `cargo install terminal-magic` to install the binary, or build it by yoursel
 
 You need to initialize the `terminal-magic` with a git repository containing modules. For that proceed as following:
 
-- `terminal-magic --clone <git_repo_url_with_user_name> [--ssh_key <key>]` (notice that 1) if you are using a username and pw to clone you cannot use a ssh_key to update later on and 2) we currently don't support password protected ssh_key files)
+- `terminal-magic --clone <git_repo_url_with_user_name> [--ssh_key <key>]` (if something goes wrong during clone, you might need to delete `~/.terminal-magic/git_modules` and try again.)
 
 - `terminal-magic list`
 
