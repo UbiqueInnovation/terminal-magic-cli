@@ -225,6 +225,7 @@ fn read_dir(dir: &Path, base: &str) -> std::io::Result<()> {
         for entry in std::fs::read_dir(dir)? {
             let entry = entry?;
             let path = entry.path();
+            
             let str_path = path.to_string_lossy();
             if str_path.contains(".git") {
                 continue;
@@ -232,7 +233,7 @@ fn read_dir(dir: &Path, base: &str) -> std::io::Result<()> {
             if path.is_dir() {
                 let _ = read_dir(&path, base);
             }
-            if str_path.contains("config.toml") {
+            if path.ends_with("config.toml"){
                 let module = dir.strip_prefix(base).unwrap();
                 let module_str: ColoredString;
                 let mut installed = "";
