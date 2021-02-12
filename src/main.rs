@@ -9,8 +9,9 @@ use colored::*;
 use dirs::home_dir;
 use mustache::MapBuilder;
 use prompts::{confirm::ConfirmPrompt, text::TextPrompt, Prompt};
+use semver::Version;
 use serde_derive::{Deserialize, Serialize};
-use std::path::{Path, PathBuf};
+use std::{path::{Path, PathBuf}, str::FromStr};
 use toml;
 use std::sync::Mutex;
 use indexmap::IndexMap;
@@ -179,7 +180,30 @@ fn main() {
         Some("update") => {
             if let Some(install_cmd) = matches.subcommand_matches("update") {
                 if let Some(plugin_name) = install_cmd.value_of("INPUT") {
-                    update(&git_repo, plugin_name);
+                    if plugin_name == "all" {
+                        println!("{}\n\n", "Start updating all packages".green());
+                        let modules = if let Ok(modules) = get_list_of_installed_modules(&HOME, &HOME.to_string_lossy()) {modules} else {
+                            eprintln!("Could not get list of installed modules");
+                            std::process::exit(1)
+                        };
+                        for module in modules {
+                            let module = module.replace("/script.sh", "");
+                            let base = HOME.join(&module);
+                            let config = read_config(&(base.join("config.toml"))).expect("No config for module found");
+                            let new_config = read_config(&Path::new(&git_repo).join(&module).join("config.toml")).expect("Cannot find module");
+                            if let (Ok(old_version), Ok(new_version)) = (Version::parse(&config.plugin_info.version), Version::parse(&new_config.plugin_info.version)) {
+                                if new_version > old_version {
+                                    if config.placeholders == new_config.placeholders {
+                                        println!("[{}] Try updating from {} to {}",module.yellow(), old_version, new_version);
+                                        update(&git_repo, &module,false);
+                                    }
+                                }
+                            }
+                        }
+                        println!("{}", "\n 🥳 All updateable packages are up to date.\n".green());
+                    } else {
+                        update(&git_repo, plugin_name, true);
+                    }
                 } else {
                     eprintln!("{}", matches.usage());
                     std::process::exit(1);
@@ -211,6 +235,15 @@ fn main() {
     if update_source_file().is_err() {
         eprintln!("{}", "Could not update globals source file".red());
     } else {
+        let command = format!("source ~/{}/env", CONFIG_DIR);
+        let alternative_command = format!("source {}", &HOME.join("env").to_string_lossy());
+        let zshrc_file = &home_dir().unwrap_or(PathBuf::from_str("~").unwrap()).join(".zshrc");
+        if let Ok(lines) = std::fs::read_to_string(zshrc_file) {
+            if lines.contains(&command)
+            || lines.contains(&alternative_command) {
+                std::process::exit(0);
+            }
+        }
         println!(
             "Make sure to include {}{}{} in your ~/.zshrc",
             "source ~/".green(),
@@ -338,16 +371,20 @@ fn password_prompt(prompt_string : &str) -> Option<String>{
     }
 }
 
-fn update(git_repo: &str, plugin_name: &str) {
+fn update(git_repo: &str, plugin_name: &str, fail_on_error: bool) {
     let home_path = HOME.join(plugin_name);
     if !home_path.exists() {
         eprintln!("module is not installed");
-        std::process::exit(1);
+        if fail_on_error {
+            std::process::exit(1);
+        }
     }
     let path_to_module = Path::new(git_repo).join(plugin_name);
     if !path_to_module.exists() {
         eprintln!("{}", "Could not find module in the git repo. Did you execute `git pull`?".red());
-        std::process::exit(1);
+         if fail_on_error {
+            std::process::exit(1);
+        }
     }
     let mustache = mustache::compile_path(path_to_module.join("template.sh"))
         .expect("Could not parse mustache template");
@@ -368,8 +405,10 @@ fn update(git_repo: &str, plugin_name: &str) {
         let new_config_str = toml::to_string(&new_config).unwrap();
         print_diff(&old_config_str, &new_config_str);
         if old_config.placeholders != new_config.placeholders {
-            eprintln!("{}", "Placeholders are different, cannot merge yet data files. Abort!".red());
+            eprintln!("{} {}", "Placeholders are different, cannot merge yet data files.".red(), if fail_on_error { "Abbort!".red() } else { "Continue!".red()});
+            if fail_on_error {
             std::process::exit(1);
+        }
         }
     }
 
