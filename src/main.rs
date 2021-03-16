@@ -538,13 +538,14 @@ fn install(git_repo: &str, plugin_name: &str) {
 }
 
 fn add_files_as_vars(files: &IndexMap<String, FileSystemEntry>, mut mustache_map_builder: MapBuilder, home: &PathBuf, path_to_module: &Path, cwd: &Path, should_overwrite: bool) -> MapBuilder {
+    if should_overwrite {
+        write_supporting_files(files, home, path_to_module, cwd);
+    }
     for (place_holder, entry) in files.iter() {
         match entry {
             FileSystemEntry::File {version, path, destination} => {
                 let destination = if let Some(destination) = destination {destination.to_owned().parse().expect("Could not parse path")} else { cwd.join(path)};
-                if should_overwrite {
-                    write_supporting_files(files, home, path_to_module, cwd);
-                }
+                
                 mustache_map_builder = mustache_map_builder.insert(place_holder, &destination.to_string_lossy()).expect("Error inserting file placeholder");
             }
             FileSystemEntry::Directory { version, destination, path, files } => {
