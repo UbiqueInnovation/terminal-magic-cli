@@ -447,13 +447,13 @@ fn update(git_repo: &str, plugin_name: &str, fail_on_error: bool) {
                 .expect("Could not parse object");
         }
     }
-
-    if boolean_prompt("Update supporting files?") {
-        if let Some(files) = toml.supporting_files.as_mut() {
-            let home_path = HOME.join(plugin_name);
-            mustache_map_builder = add_files_as_vars(files, mustache_map_builder, &home_path, &path_to_module, &&home_path);
-        }
+    let should_overwrite = boolean_prompt("Update supporting files?");
+    
+    if let Some(files) = &new_config.supporting_files {
+        let home_path = HOME.join(plugin_name);
+        mustache_map_builder = add_files_as_vars(files, mustache_map_builder, &home_path, &path_to_module, &home_path, should_overwrite);
     }
+    
 
     let mustache_map = mustache_map_builder.build();
     let script = render(mustache, mustache_map);
@@ -529,27 +529,29 @@ fn install(git_repo: &str, plugin_name: &str) {
         println!("Created Plugin directory");
     }
     println!("Copying supporting files");
-    if let Some(files) = toml.supporting_files.as_mut() {
-        mustache_map_builder = add_files_as_vars(files, mustache_map_builder, &home_path, &path_to_module, &&home_path);
+    if let Some(files) = &toml.supporting_files {
+        mustache_map_builder = add_files_as_vars(files, mustache_map_builder, &home_path, &path_to_module, &home_path, true);
     }
     let mustache_map = mustache_map_builder.build();
     let script = render(mustache, mustache_map);
     write_file(toml, script, plugin_name, &path_to_module);
 }
 
-fn add_files_as_vars(files: &IndexMap<String, FileSystemEntry>, mut mustache_map_builder: MapBuilder, home: &PathBuf, path_to_module: &Path, cwd: &Path) -> MapBuilder {
-    for (place_holder, entry) in files {
+fn add_files_as_vars(files: &IndexMap<String, FileSystemEntry>, mut mustache_map_builder: MapBuilder, home: &PathBuf, path_to_module: &Path, cwd: &Path, should_overwrite: bool) -> MapBuilder {
+    for (place_holder, entry) in files.iter() {
         match entry {
             FileSystemEntry::File {version, path, destination} => {
                 let destination = if let Some(destination) = destination {destination.to_owned().parse().expect("Could not parse path")} else { cwd.join(path)};
-                write_supporting_files(files, home, path_to_module, cwd);
+                if should_overwrite {
+                    write_supporting_files(files, home, path_to_module, cwd);
+                }
                 mustache_map_builder = mustache_map_builder.insert(place_holder, &destination.to_string_lossy()).expect("Error inserting file placeholder");
             }
             FileSystemEntry::Directory { version, destination, path, files } => {
                 let destination = if let Some(destination) = destination {destination.to_owned().parse().expect("Could not parse path")} else { cwd.join(path)};
 
                 mustache_map_builder = mustache_map_builder.insert(place_holder, &destination.to_string_lossy()).expect("Error inserting file placeholder");
-                mustache_map_builder = add_files_as_vars(files, mustache_map_builder, home, path_to_module, cwd);
+                mustache_map_builder = add_files_as_vars(files, mustache_map_builder, home, path_to_module, cwd, should_overwrite);
             }
         }
     }

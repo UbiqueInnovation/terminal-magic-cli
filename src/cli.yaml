@@ -1,5 +1,5 @@
 name: Terminal Magic
-version: "1.0"
+version: "0.3.1"
 author: Systems Department @UbiqueCH
 about: Manage zsh stuff (aka Terminal Magic)
 args:
