@@ -447,6 +447,14 @@ fn update(git_repo: &str, plugin_name: &str, fail_on_error: bool) {
                 .expect("Could not parse object");
         }
     }
+
+    if boolean_prompt("Update supporting files?") {
+        if let Some(files) = toml.supporting_files.as_mut() {
+            let home_path = HOME.join(plugin_name);
+            mustache_map_builder = add_files_as_vars(files, mustache_map_builder, &home_path, &path_to_module, &&home_path);
+        }
+    }
+
     let mustache_map = mustache_map_builder.build();
     let script = render(mustache, mustache_map);
     let old_script = get_old_script(plugin_name);
@@ -516,9 +524,65 @@ fn install(git_repo: &str, plugin_name: &str) {
                 .expect("Could not parse object");
         }
     }
+    let home_path = HOME.join(plugin_name);
+    if let Ok(_) = std::fs::create_dir_all(&home_path) {
+        println!("Created Plugin directory");
+    }
+    println!("Copying supporting files");
+    if let Some(files) = toml.supporting_files.as_mut() {
+        mustache_map_builder = add_files_as_vars(files, mustache_map_builder, &home_path, &path_to_module, &&home_path);
+    }
     let mustache_map = mustache_map_builder.build();
     let script = render(mustache, mustache_map);
     write_file(toml, script, plugin_name, &path_to_module);
+}
+
+fn add_files_as_vars(files: &IndexMap<String, FileSystemEntry>, mut mustache_map_builder: MapBuilder, home: &PathBuf, path_to_module: &Path, cwd: &Path) -> MapBuilder {
+    for (place_holder, entry) in files {
+        match entry {
+            FileSystemEntry::File {version, path, destination} => {
+                let destination = if let Some(destination) = destination {destination.to_owned().parse().expect("Could not parse path")} else { cwd.join(path)};
+                write_supporting_files(files, home, path_to_module, cwd);
+                mustache_map_builder = mustache_map_builder.insert(place_holder, &destination.to_string_lossy()).expect("Error inserting file placeholder");
+            }
+            FileSystemEntry::Directory { version, destination, path, files } => {
+                let destination = if let Some(destination) = destination {destination.to_owned().parse().expect("Could not parse path")} else { cwd.join(path)};
+
+                mustache_map_builder = mustache_map_builder.insert(place_holder, &destination.to_string_lossy()).expect("Error inserting file placeholder");
+                mustache_map_builder = add_files_as_vars(files, mustache_map_builder, home, path_to_module, cwd);
+            }
+        }
+    }
+    mustache_map_builder
+}
+
+fn write_supporting_files(files: &IndexMap<String, FileSystemEntry>, home: &PathBuf, path_to_module: &Path, cwd: &Path){
+    for (entry, file) in files {
+        match file {
+            FileSystemEntry::File { version, path, destination } => {
+                let destination = if let Some(destination) = destination {destination.to_owned().parse().expect("Could not parse path")} else { cwd.join(path)};
+                if let Ok(_) = std::fs::remove_file(&destination) {
+                    println!("{:?} existed, overwriting with new version: {}", destination, version);
+                }
+                let source_relative = path.parse::<PathBuf>().expect("Source path is invalid");
+                let source = path_to_module.join(source_relative);
+                if let Err(err) = std::fs::copy(
+                    &source,
+                    &destination
+                ){
+                    panic!("Could not copy file from source {:?} to {:?}\n{:?}", source, destination, err);
+                }
+            }
+            FileSystemEntry::Directory { version, path, destination, files } => {
+                let destination = if let Some(destination) = destination {destination.to_owned().parse().expect("Could not parse path")} else { cwd.join(path)};
+
+                if let Ok(_) = std::fs::create_dir_all(&destination) {
+                    println!("Created {:?} [{}]", destination, version);
+                }
+                write_supporting_files(files, home, path_to_module, &destination);
+            }
+        }
+    }
 }
 
 fn get_old_script(plugin_name : &str) -> String {
@@ -538,6 +602,10 @@ fn write_file(toml: PluginInfo,script : String, plugin_name : &str, path_to_modu
         path_to_module.join("config.toml"),
         home_path.join("config.toml"),
     ) {}
+    
+    // if let Some(files) = &toml.supporting_files {
+    //     write_supporting_files(files, &home_path, path_to_module, &home_path);
+    // }
    
     if let Ok(_) =  std::fs::write(home_path.join("script.sh"), script){
         if let Ok(_) = std::fs::remove_file(home_path.join("data.toml")) {
@@ -785,7 +853,22 @@ pub fn find_last_commit(repo: &Repository) -> Result<Commit, git2::Error> {
 struct PluginInfo {
     plugin_info: Package,
     placeholders: Option<IndexMap<String, EntryType>>,
+    // interpreter: Option<Interpreter>,
+    supporting_files: Option<IndexMap<String, FileSystemEntry>>
 }
+
+#[derive(Deserialize, Serialize, Debug, PartialEq)]
+#[serde(untagged)]
+enum FileSystemEntry {
+    File { version:String, path: String, destination: Option<String>},
+    Directory {version: String, path: String, destination: Option<String>, files : IndexMap<String, FileSystemEntry> }
+}
+
+// #[derive(Deserialize,Serialize,Debug,PartialEq)]
+// struct Interpreter {
+//     name : String,
+//     install_path: String
+// }
 
 #[derive(Deserialize, Serialize, Debug, PartialEq)]
 struct Package {
