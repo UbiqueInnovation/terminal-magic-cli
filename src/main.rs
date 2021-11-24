@@ -1090,16 +1090,16 @@ struct PluginInfo {
 #[derive(Deserialize, Serialize, Debug, PartialEq)]
 #[serde(untagged)]
 enum FileSystemEntry {
-    File {
-        version: String,
-        path: String,
-        destination: Option<String>,
-    },
     Directory {
         version: String,
         path: String,
         destination: Option<String>,
         files: IndexMap<String, FileSystemEntry>,
+    },
+    File {
+        version: String,
+        path: String,
+        destination: Option<String>,
     },
 }
 
