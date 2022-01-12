@@ -1,6 +1,6 @@
 [package]
 name = "terminal-magic"
-version = "0.3.5"
+version = "0.4.0"
 authors = ["Systems @ Ubique <backend@ubique.ch>"]
 edition = "2018"
 description = "Package to organize shell extensions andd scripts"
@@ -12,20 +12,20 @@ readme = "README.md"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-toml = "0.5"
-serde_derive = "1.0"
-serde = "1.0"
+toml = "0.5.8"
+serde_derive = "1.0.133"
+serde = "1.0.133"
 mustache = "0.9.0"
 prompts = "0.1.0"
-async-std = {version = "1.9.0", features = ["attributes"]}
-futures = "0.3"
-clap = {version = "2.33", features = ["yaml"]}
-dirs = "3.0"
-colored = "2.0"
+async-std = { version = "1.10.0", features = ["attributes"] }
+futures = "0.3.19"
+clap = { version = "2.33", features = ["yaml"] }
+dirs = "4.0.0"
+colored = "2.0.0"
 diff = "0.1.12"
 lazy_static = "1.4.0"
-shellexpand = "2.1"
-indexmap = {version= "1.6", features = ["serde-1"]}
-git2 = "0.13"
-regex = "1.4"
-semver = "0.11.0"
+shellexpand = "2.1.0"
+indexmap = { version = "1.8.0", features = ["serde-1"] }
+git2 = "0.13.25"
+regex = "1.5.4"
+semver = "1.0.4"

@@ -19,7 +19,6 @@ use std::{
     process::Command,
     str::FromStr,
 };
-use toml;
 
 static CONFIG_DIR: &str = ".terminal-magic";
 
@@ -419,22 +418,21 @@ fn update_source_file() -> std::io::Result<()> {
 }
 
 fn boolean_prompt(prompt_string: &str) -> bool {
-    let mut prompt = ConfirmPrompt::new(format!("{}", prompt_string));
+    let mut prompt = ConfirmPrompt::new(prompt_string);
     match task::block_on(async { prompt.run().await }) {
         Ok(Some(val)) => val,
         _ => std::process::exit(1),
     }
 }
 fn text_prompt(prompt_string: &str) -> Option<String> {
-    let mut prompt = TextPrompt::new(format!("{}", prompt_string));
+    let mut prompt = TextPrompt::new(prompt_string);
     match task::block_on(async { prompt.run().await }) {
         Ok(val) => val,
         _ => None,
     }
 }
 fn password_prompt(prompt_string: &str) -> Option<String> {
-    let mut prompt =
-        TextPrompt::new(format!("{}", prompt_string)).with_style(prompts::text::Style::Password);
+    let mut prompt = TextPrompt::new(prompt_string).with_style(prompts::text::Style::Password);
     match task::block_on(async { prompt.run().await }) {
         Ok(val) => val,
         _ => None,
@@ -463,11 +461,12 @@ fn update(git_repo: &str, plugin_name: &str, fail_on_error: bool) {
         .expect("Could not parse mustache template");
 
     let mut toml = read_config(&home_path.join("data.toml")).expect("Cannot find TOML");
+    let old_toml = toml.clone();
     let old_config = read_config(&home_path.join("config.toml"))
         .expect("Cannot find old config (maybe you did update terminal-magic)");
     let new_config =
         read_config(&path_to_module.join("config.toml")).expect("module config not found");
-
+    let mut mustache_map_builder = MapBuilder::new();
     if old_config != new_config {
         println!("{}", "Config changed check the changes".yellow());
 
@@ -475,24 +474,31 @@ fn update(git_repo: &str, plugin_name: &str, fail_on_error: bool) {
         let new_config_str = toml::to_string(&new_config).unwrap();
         print_diff(&old_config_str, &new_config_str);
         if old_config.placeholders != new_config.placeholders {
-            eprintln!(
-                "{} {}",
-                "Placeholders are different, cannot merge yet data files.".red(),
-                if fail_on_error {
-                    "Abbort!".red()
-                } else {
-                    "Continue!".red()
+            let mut update_map = IndexMap::new();
+            if let Some(new_placeholders) = &new_config.placeholders {
+                for (key, entry) in new_placeholders {
+                    if let Some(v) = toml.placeholders.as_ref().and_then(|a| a.get(key)) {
+                        update_map.insert(key.to_owned(), v.to_owned());
+                    } else {
+                        // prompt new value
+                        let (new_mustache_map_builder, object) =
+                            read(key, entry, mustache_map_builder);
+                        mustache_map_builder = new_mustache_map_builder;
+                        mustache_map_builder = mustache_map_builder
+                            .insert(key.to_string(), &object)
+                            .expect("Could not insert object");
+                    }
                 }
-            );
-            if fail_on_error {
-                std::process::exit(1);
+                toml.placeholders = Some(update_map);
+            } else {
+                toml.placeholders = None;
             }
         }
     }
 
     if let Some(internal_deps) = toml.plugin_info.internal_dependencies.as_mut() {
         for dep in internal_deps {
-            install(git_repo, &dep);
+            install(git_repo, dep);
         }
     }
     if let Some(external_deps) = toml.plugin_info.external_dependencies.as_ref() {
@@ -505,26 +511,37 @@ fn update(git_repo: &str, plugin_name: &str, fail_on_error: bool) {
         }
     }
 
-    let mut mustache_map_builder = MapBuilder::new();
     if let Some(placeholders) = toml.placeholders.as_mut() {
         for placeholder in placeholders.iter_mut() {
-            if let EntryType::Array(arr) = placeholder.1 {
-                if boolean_prompt(&format!("Add new elements [{}]? ", placeholder.0)) {
-                    if let EntryType::Array(element) = old_config
-                        .placeholders
-                        .as_ref()
-                        .unwrap()
-                        .get(placeholder.0)
-                        .unwrap()
-                    {
-                        let element = element.first().unwrap().clone();
-                        arr.insert(0, element);
-                        mustache_map_builder = read_array(placeholder.0, arr, mustache_map_builder);
+            if old_toml
+                .placeholders
+                .as_ref()
+                .and_then(|a| a.get(placeholder.0))
+                .is_some()
+            {
+                if let EntryType::Array(arr) = placeholder.1 {
+                    if boolean_prompt(&format!("Add new elements [{}]? ", placeholder.0)) {
+                        if old_config
+                            .placeholders
+                            .as_ref()
+                            .unwrap()
+                            .get(placeholder.0)
+                            .is_some()
+                        {
+                            let (new_mustache_map_builder, object) =
+                                read_array(placeholder.0, &arr[0], mustache_map_builder);
+                            mustache_map_builder = new_mustache_map_builder;
+                            arr.extend(if let EntryType::Array(a) = object {
+                                a
+                            } else {
+                                unreachable!("read_array MUST always return an EntryType::Array")
+                            });
+                        }
+                    } else {
+                        let name = get_short_names(arr);
+                        mustache_map_builder = mustache_map_builder
+                            .insert_str(format!("{}_shortNames", placeholder.0), name);
                     }
-                } else {
-                    let name = get_short_names(arr);
-                    mustache_map_builder = mustache_map_builder
-                        .insert_str(format!("{}_shortNames", placeholder.0), name);
                 }
             }
             mustache_map_builder = mustache_map_builder
@@ -555,7 +572,7 @@ fn update(git_repo: &str, plugin_name: &str, fail_on_error: bool) {
     if !boolean_prompt("Update?") {
         std::process::exit(1);
     }
-    
+
     if let PluginType::RustPackage { path, git } = new_config.plugin_info.plugin_type {
         let mut install_command = Command::new("cargo");
         if let Some(git) = git {
@@ -640,16 +657,19 @@ fn install(git_repo: &str, plugin_name: &str) {
     }
     let mut mustache_map_builder = MapBuilder::new();
     if let Some(placeholders) = toml.placeholders.as_mut() {
-        for mut placeholder in placeholders.iter_mut() {
+        for placeholder in placeholders.iter_mut() {
             println!("Read {}", placeholder.0);
-            mustache_map_builder = read(&placeholder.0, &mut placeholder.1, mustache_map_builder);
+            let (new_mustache_map_builder, object) =
+                read(placeholder.0, placeholder.1, mustache_map_builder);
+            mustache_map_builder = new_mustache_map_builder;
+
             mustache_map_builder = mustache_map_builder
-                .insert(placeholder.0, &placeholder.1)
+                .insert(placeholder.0, &object)
                 .expect("Could not parse object");
         }
     }
     let home_path = HOME.join(plugin_name);
-    if let Ok(_) = std::fs::create_dir_all(&home_path) {
+    if std::fs::create_dir_all(&home_path).is_ok() {
         println!("Created Plugin directory");
     }
     println!("Copying supporting files");
@@ -858,36 +878,29 @@ fn render(mustache: mustache::Template, mustache_map: mustache::Data) -> String 
         .expect("Could not render mustache template")
 }
 
-fn read(key: &str, entry_type: &mut EntryType, mut map_builder: MapBuilder) -> MapBuilder {
+fn read(key: &str, entry_type: &EntryType, map_builder: MapBuilder) -> (MapBuilder, EntryType) {
     match entry_type {
-        EntryType::Value(str) => {
-            read_value(key, str);
-        }
-        EntryType::Array(array) => {
-            map_builder = read_array(key, array, map_builder);
-        }
-        EntryType::Object(obj) => {
-            map_builder = read_object(obj, map_builder);
-        }
+        EntryType::Value(str) => (map_builder, read_value(key, str)),
+        EntryType::Array(array) => read_array(key, &array[0], map_builder),
+        EntryType::Object(obj) => read_object(obj, map_builder),
     }
-    map_builder
 }
 
-fn read_value(key: &str, str: &mut String) {
+fn read_value(key: &str, str: &str) -> EntryType {
     let mut prompt = TextPrompt::new(format!("{} [{}]? ", key, str));
     match task::block_on(async { prompt.run().await }) {
         Ok(Some(s)) => {
             if !s.is_empty() {
-                *str = shellexpand::tilde(&s).to_string();
+                EntryType::Value(shellexpand::tilde(&s).to_string())
             } else {
-                *str = shellexpand::tilde(&str).to_string();
+                EntryType::Value(shellexpand::tilde(&str).to_string())
             }
         }
         _ => std::process::exit(1),
     }
 }
 
-fn get_short_names(array: &Vec<EntryType>) -> String {
+fn get_short_names(array: &[EntryType]) -> String {
     let mut short_names: Vec<String> = vec![];
     for entry in array {
         if let EntryType::Object(obj) = entry {
@@ -901,29 +914,39 @@ fn get_short_names(array: &Vec<EntryType>) -> String {
     short_names.join(" ")
 }
 
-fn read_array(key: &str, array: &mut Vec<EntryType>, mut map_builder: MapBuilder) -> MapBuilder {
-    let proto_type: EntryType = array.remove(0);
+fn read_array(
+    key: &str,
+    proto_type: &EntryType,
+    mut map_builder: MapBuilder,
+) -> (MapBuilder, EntryType) {
+    let mut new_array = vec![];
     loop {
-        let mut object = proto_type.clone();
-        map_builder = read(key, &mut object, map_builder);
-
-        array.push(object);
-        let mut prompt = ConfirmPrompt::new(format!("Another one? "));
+        let object = proto_type.clone();
+        let (new_map_builder, object_to_insert) = read(key, &object, map_builder);
+        map_builder = new_map_builder;
+        new_array.push(object_to_insert);
+        let mut prompt = ConfirmPrompt::new("Another one? ");
         match task::block_on(async { prompt.run().await }) {
             Ok(Some(true)) => continue,
             _ => break,
         }
     }
-    let name = get_short_names(array);
+    let name = get_short_names(&new_array);
     map_builder = map_builder.insert_str(format!("{}_shortNames", key), name);
-    map_builder
+    (map_builder, EntryType::Array(new_array))
 }
 
-fn read_object(obj: &mut IndexMap<String, EntryType>, mut map_builder: MapBuilder) -> MapBuilder {
-    for mut keys in obj.iter_mut() {
-        map_builder = read(keys.0, &mut keys.1, map_builder);
+fn read_object(
+    obj: &IndexMap<String, EntryType>,
+    mut map_builder: MapBuilder,
+) -> (MapBuilder, EntryType) {
+    let mut new_obj = IndexMap::new();
+    for keys in obj.iter() {
+        let (new_map_builder, object) = read(keys.0, keys.1, map_builder);
+        map_builder = new_map_builder;
+        new_obj.insert(keys.0.to_string(), object);
     }
-    map_builder
+    (map_builder, EntryType::Object(new_obj))
 }
 
 //GIT Section
@@ -935,11 +958,10 @@ fn get_callbacks<'a>(ssh_key: Option<PathBuf>, key_needs_pw: bool) -> RemoteCall
         let mut username = String::from("");
         if let Some(name_from_url) = username_from_url {
             username = String::from(name_from_url);
-        } else {
-            if let Some(user) = text_prompt("Git Username: ") {
-                username = user;
-            }
+        } else if let Some(user) = text_prompt("Git Username: ") {
+            username = user;
         }
+
         if allowed_types.is_user_pass_plaintext() {
             if let Some(password) = password_prompt("Git Password: ") {
                 Cred::userpass_plaintext(&username, &password)
@@ -950,32 +972,30 @@ fn get_callbacks<'a>(ssh_key: Option<PathBuf>, key_needs_pw: bool) -> RemoteCall
             if let Some(ssh_key) = &ssh_key {
                 if key_needs_pw {
                     if let Some(key_pw) = password_prompt("SSH key password: ") {
-                        Cred::ssh_key(&username, None, &ssh_key, Some(&key_pw))
+                        Cred::ssh_key(&username, None, ssh_key, Some(&key_pw))
                     } else {
                         Cred::default()
                     }
                 } else {
-                    Cred::ssh_key(&username, None, &ssh_key, None)
+                    Cred::ssh_key(&username, None, ssh_key, None)
                 }
-            } else {
-                if let Some(key_path) = text_prompt("SSH Key Path: ") {
-                    let key_path = shellexpand::tilde(&key_path).to_string();
-                    GLOBAL_CONFIG.lock().unwrap().ssh_key = Some(key_path.clone());
-                    let key_path = Path::new(&key_path);
-                    let key_needs_pw = boolean_prompt("Is the key password protected? ");
-                    GLOBAL_CONFIG.lock().unwrap().key_needs_pw = key_needs_pw;
-                    if key_needs_pw {
-                        if let Some(key_pw) = password_prompt("SSH key password: ") {
-                            Cred::ssh_key(&username, None, key_path, Some(&key_pw))
-                        } else {
-                            Cred::default()
-                        }
+            } else if let Some(key_path) = text_prompt("SSH Key Path: ") {
+                let key_path = shellexpand::tilde(&key_path).to_string();
+                GLOBAL_CONFIG.lock().unwrap().ssh_key = Some(key_path.clone());
+                let key_path = Path::new(&key_path);
+                let key_needs_pw = boolean_prompt("Is the key password protected? ");
+                GLOBAL_CONFIG.lock().unwrap().key_needs_pw = key_needs_pw;
+                if key_needs_pw {
+                    if let Some(key_pw) = password_prompt("SSH key password: ") {
+                        Cred::ssh_key(&username, None, key_path, Some(&key_pw))
                     } else {
-                        Cred::ssh_key(&username, None, key_path, None)
+                        Cred::default()
                     }
                 } else {
-                    Cred::default()
+                    Cred::ssh_key(&username, None, key_path, None)
                 }
+            } else {
+                Cred::default()
             }
         } else {
             Cred::default()
@@ -1079,7 +1099,7 @@ pub fn find_last_commit(repo: &Repository) -> Result<Commit, git2::Error> {
     }
 }
 
-#[derive(Deserialize, Serialize, Debug, PartialEq)]
+#[derive(Deserialize, Serialize, Debug, PartialEq, Clone)]
 struct PluginInfo {
     plugin_info: Package,
     placeholders: Option<IndexMap<String, EntryType>>,
@@ -1087,7 +1107,7 @@ struct PluginInfo {
     supporting_files: Option<IndexMap<String, FileSystemEntry>>,
 }
 
-#[derive(Deserialize, Serialize, Debug, PartialEq)]
+#[derive(Deserialize, Serialize, Debug, PartialEq, Clone)]
 #[serde(untagged)]
 enum FileSystemEntry {
     Directory {
@@ -1109,7 +1129,7 @@ enum FileSystemEntry {
 //     install_path: String
 // }
 
-#[derive(Deserialize, Serialize, Debug, PartialEq)]
+#[derive(Deserialize, Serialize, Debug, PartialEq, Clone)]
 struct Package {
     author: String,
     version: String,
@@ -1119,7 +1139,7 @@ struct Package {
     plugin_type: PluginType,
 }
 
-#[derive(Deserialize, Serialize, Debug, PartialEq)]
+#[derive(Deserialize, Serialize, Debug, PartialEq, Clone)]
 #[serde(untagged)]
 enum PluginType {
     Shell(String),
