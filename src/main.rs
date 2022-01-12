@@ -488,6 +488,7 @@ fn update(git_repo: &str, plugin_name: &str, fail_on_error: bool, silent: bool) 
             }
         }
     }
+    toml.plugin_info = new_config.plugin_info.clone();
 
     if let Some(internal_deps) = toml.plugin_info.internal_dependencies.as_mut() {
         for dep in internal_deps {
