@@ -64,20 +64,20 @@ fn main() {
         if matches.is_present("git_repo") {
             git_repo = String::from(matches.value_of("git_repo").unwrap());
 
-            glob_conf.git_repo = shellexpand::tilde(&git_repo.clone()).to_string();
+            glob_conf.git_repo = shellexpand::tilde(&git_repo).to_string();
             glob_conf.save().expect("Could not save global config");
         } else {
             git_repo = shellexpand::tilde(&glob_conf.git_repo.clone()).to_string();
         }
         println!("Module Git Repo: {}", git_repo.green());
-        println!("");
+        println!();
     }
     if matches.is_present("clone") {
         let clone_url = matches.value_of("clone").unwrap();
         if matches.is_present("ssh_key") {
             let ssh_key = Path::new(matches.value_of("ssh_key").unwrap());
             println!("{}{}", "Using key ".green(), ssh_key.to_string_lossy());
-            match check_out_modules_with_key(clone_url, &ssh_key) {
+            match check_out_modules_with_key(clone_url, ssh_key) {
                 Ok(_) => {
                     println!(
                         "{}{}{}",
@@ -149,7 +149,7 @@ fn main() {
                             );
                         }
 
-                        println!("");
+                        println!();
                         if let Some(help) = config.plugin_info.help {
                             let re = Regex::new(r"`(?P<color>[a-z]*)\s(?P<content>[\s\S]*?)\s*`")
                                 .unwrap();
@@ -162,7 +162,7 @@ fn main() {
                             if cursor < help.len() - 1 {
                                 print!("{}", &help[cursor..])
                             }
-                            println!("");
+                            println!();
                         }
 
                         if let Some(internal_dependencies) =
@@ -186,7 +186,7 @@ fn main() {
                                 );
                             }
                         }
-                        println!("");
+                        println!();
                         if let Some(external_dependencies) =
                             &config.plugin_info.external_dependencies
                         {
@@ -200,13 +200,8 @@ fn main() {
                         }
                     }
                     std::process::exit(0);
-                } else {
-                    match update_modules() {
-                        Err(e) => {
-                            eprintln!("{}{:?}", "Could not update repo".red(), e);
-                        }
-                        _ => {}
-                    }
+                } else if let Err(e) = update_modules() {
+                    eprintln!("{}{:?}", "Could not update repo".red(), e);
                 }
                 let path_to_module = Path::new(&git_repo);
                 if read_dir(path_to_module, &git_repo).is_err() {
@@ -253,16 +248,16 @@ fn main() {
                                 Version::parse(&config.plugin_info.version),
                                 Version::parse(&new_config.plugin_info.version),
                             ) {
-                                if new_version > old_version {
-                                    if config.placeholders == new_config.placeholders {
-                                        println!(
-                                            "[{}] Try updating from {} to {}",
-                                            module.yellow(),
-                                            old_version,
-                                            new_version
-                                        );
-                                        update(&git_repo, &module, false);
-                                    }
+                                if new_version > old_version
+                                    && config.placeholders == new_config.placeholders
+                                {
+                                    println!(
+                                        "[{}] Try updating from {} to {}",
+                                        module.yellow(),
+                                        old_version,
+                                        new_version
+                                    );
+                                    update(&git_repo, &module, false);
                                 }
                             }
                         }
@@ -307,7 +302,7 @@ fn main() {
         let command = format!("source ~/{}/env", CONFIG_DIR);
         let alternative_command = format!("source {}", &HOME.join("env").to_string_lossy());
         let zshrc_file = &home_dir()
-            .unwrap_or(PathBuf::from_str("~").unwrap())
+            .unwrap_or_else(|| PathBuf::from_str("~").unwrap())
             .join(".zshrc");
         if let Ok(lines) = std::fs::read_to_string(zshrc_file) {
             if lines.contains(&command) || lines.contains(&alternative_command) {
@@ -373,7 +368,7 @@ fn read_config(config_path: &Path) -> Result<PluginInfo, std::io::Error> {
     if let Ok(pi) = toml::from_str(&toml_str) {
         return Ok(pi);
     }
-    return Err(std::io::Error::from(std::io::ErrorKind::InvalidData));
+    Err(std::io::Error::from(std::io::ErrorKind::InvalidData))
 }
 
 fn get_list_of_installed_modules(path: &Path, base: &str) -> std::io::Result<Vec<String>> {
@@ -386,15 +381,13 @@ fn get_list_of_installed_modules(path: &Path, base: &str) -> std::io::Result<Vec
                 if let Ok(mut list) = get_list_of_installed_modules(&path, base) {
                     out_result.append(&mut list);
                 }
-            } else {
-                if path.to_string_lossy().contains("script.sh") {
-                    out_result.push(
-                        path.strip_prefix(base)
-                            .unwrap()
-                            .to_string_lossy()
-                            .to_string(),
-                    );
-                }
+            } else if path.to_string_lossy().contains("script.sh") {
+                out_result.push(
+                    path.strip_prefix(base)
+                        .unwrap()
+                        .to_string_lossy()
+                        .to_string(),
+                );
             }
         }
     }
@@ -403,7 +396,7 @@ fn get_list_of_installed_modules(path: &Path, base: &str) -> std::io::Result<Vec
 
 fn update_source_file() -> std::io::Result<()> {
     let base = &HOME;
-    let modules = get_list_of_installed_modules(&base, &base.to_string_lossy())?;
+    let modules = get_list_of_installed_modules(base, &base.to_string_lossy())?;
     let env_path = base.join("env");
     if env_path.exists() {
         std::fs::remove_file(&env_path).expect("Cannot delete file");
@@ -600,7 +593,7 @@ fn update(git_repo: &str, plugin_name: &str, fail_on_error: bool) {
 }
 
 fn print_diff(left: &str, right: &str) {
-    for diff in diff::lines(&left, &right) {
+    for diff in diff::lines(left, right) {
         match diff {
             diff::Result::Left(l) => println!("-{}", l.red()),
             diff::Result::Both(_, _) => {}
@@ -716,7 +709,7 @@ fn install(git_repo: &str, plugin_name: &str) {
 fn add_files_as_vars(
     files: &IndexMap<String, FileSystemEntry>,
     mut mustache_map_builder: MapBuilder,
-    home: &PathBuf,
+    home: &Path,
     path_to_module: &Path,
     cwd: &Path,
     should_overwrite: bool,
@@ -727,7 +720,7 @@ fn add_files_as_vars(
     for (place_holder, entry) in files.iter() {
         match entry {
             FileSystemEntry::File {
-                version,
+                version: _version,
                 path,
                 destination,
             } => {
@@ -745,7 +738,7 @@ fn add_files_as_vars(
                     .expect("Error inserting file placeholder");
             }
             FileSystemEntry::Directory {
-                version,
+                version: _version,
                 destination,
                 path,
                 files,
@@ -778,11 +771,11 @@ fn add_files_as_vars(
 
 fn write_supporting_files(
     files: &IndexMap<String, FileSystemEntry>,
-    home: &PathBuf,
+    home: &Path,
     path_to_module: &Path,
     cwd: &Path,
 ) {
-    for (entry, file) in files {
+    for (_, file) in files {
         match file {
             FileSystemEntry::File {
                 version,
@@ -797,7 +790,7 @@ fn write_supporting_files(
                 } else {
                     cwd.join(path)
                 };
-                if let Ok(_) = std::fs::remove_file(&destination) {
+                if std::fs::remove_file(&destination).is_ok() {
                     println!(
                         "{:?} existed, overwriting with new version: {}",
                         destination, version
@@ -827,7 +820,7 @@ fn write_supporting_files(
                     cwd.join(path)
                 };
 
-                if let Ok(_) = std::fs::create_dir_all(&destination) {
+                if std::fs::create_dir_all(&destination).is_ok() {
                     println!("Created {:?} [{}]", destination, version);
                 }
                 write_supporting_files(files, home, path_to_module, &destination);
@@ -843,29 +836,33 @@ fn get_old_script(plugin_name: &str) -> String {
 
 fn write_file(toml: PluginInfo, script: String, plugin_name: &str, path_to_module: &Path) {
     let home_path = HOME.join(plugin_name);
-    if let Ok(_) = std::fs::create_dir_all(&home_path) {
+    if std::fs::create_dir_all(&home_path).is_ok() {
         println!("Created directory");
     }
-    if let Ok(_) = std::fs::remove_file(home_path.join("script.sh")) {
+    if std::fs::remove_file(home_path.join("script.sh")).is_ok() {
         println!("script.sh already existed");
     }
-    if let Ok(_) = std::fs::copy(
+    if std::fs::copy(
         path_to_module.join("config.toml"),
         home_path.join("config.toml"),
-    ) {}
+    )
+    .is_ok()
+    {}
 
     // if let Some(files) = &toml.supporting_files {
     //     write_supporting_files(files, &home_path, path_to_module, &home_path);
     // }
 
-    if let Ok(_) = std::fs::write(home_path.join("script.sh"), script) {
-        if let Ok(_) = std::fs::remove_file(home_path.join("data.toml")) {
+    if std::fs::write(home_path.join("script.sh"), script).is_ok() {
+        if std::fs::remove_file(home_path.join("data.toml")).is_ok() {
             println!("data.toml File existed");
         }
-        if let Ok(_) = std::fs::write(
+        if std::fs::write(
             home_path.join("data.toml"),
             toml::to_vec(&toml).expect("could not serialize data"),
-        ) {
+        )
+        .is_ok()
+        {
             println!("Successfully wrote plugin {}!", plugin_name);
         }
     }
