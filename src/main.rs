@@ -249,7 +249,7 @@ fn main() {
                                 Version::parse(&new_config.plugin_info.version),
                             ) {
                                 if new_version > old_version
-                                    && config.placeholders == new_config.placeholders
+                                    || config.placeholders != new_config.placeholders
                                 {
                                     println!(
                                         "[{}] Try updating from {} to {}",
@@ -257,7 +257,7 @@ fn main() {
                                         old_version,
                                         new_version
                                     );
-                                    update(&git_repo, &module, false);
+                                    update(&git_repo, &module, false, true);
                                 }
                             }
                         }
@@ -266,7 +266,7 @@ fn main() {
                             "\n 🥳 All updateable packages are up to date.\n".green()
                         );
                     } else {
-                        update(&git_repo, plugin_name, true);
+                        update(&git_repo, plugin_name, true, false);
                     }
                 } else {
                     eprintln!("{}", matches.usage());
@@ -432,13 +432,14 @@ fn password_prompt(prompt_string: &str) -> Option<String> {
     }
 }
 
-fn update(git_repo: &str, plugin_name: &str, fail_on_error: bool) {
+fn update(git_repo: &str, plugin_name: &str, fail_on_error: bool, silent: bool) {
     let home_path = HOME.join(plugin_name);
     if !home_path.exists() {
         eprintln!("module is not installed");
         if fail_on_error {
             std::process::exit(1);
         }
+        return;
     }
     let path_to_module = Path::new(git_repo).join(plugin_name);
     if !path_to_module.exists() {
@@ -449,6 +450,7 @@ fn update(git_repo: &str, plugin_name: &str, fail_on_error: bool) {
         if fail_on_error {
             std::process::exit(1);
         }
+        return;
     }
     let mustache = mustache::compile_path(path_to_module.join("template.sh"))
         .expect("Could not parse mustache template");
@@ -511,7 +513,7 @@ fn update(git_repo: &str, plugin_name: &str, fail_on_error: bool) {
                 .is_some()
             {
                 if let EntryType::Array(arr) = placeholder.1 {
-                    if boolean_prompt(&format!("Add new elements [{}]? ", placeholder.0)) {
+                    if !silent && boolean_prompt(&format!("Add new elements [{}]? ", placeholder.0)) {
                         if old_config
                             .placeholders
                             .as_ref()
@@ -561,7 +563,7 @@ fn update(git_repo: &str, plugin_name: &str, fail_on_error: bool) {
     print_diff(&old_script, &script);
 
     if !boolean_prompt("Update?") {
-        std::process::exit(1);
+        return;
     }
 
     if let PluginType::RustPackage { path, git } = new_config.plugin_info.plugin_type {
@@ -618,6 +620,7 @@ fn remove(plugin_name: &str) {
 fn install(git_repo: &str, plugin_name: &str) {
     let home_path = HOME.join(plugin_name);
     if home_path.exists() {
+        update(git_repo, plugin_name, false, true);
         return;
     }
     let path_to_module = Path::new(git_repo).join(plugin_name);
