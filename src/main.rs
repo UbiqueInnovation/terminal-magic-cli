@@ -484,9 +484,7 @@ fn update(git_repo: &str, plugin_name: &str, fail_on_error: bool) {
                         let (new_mustache_map_builder, object) =
                             read(key, entry, mustache_map_builder);
                         mustache_map_builder = new_mustache_map_builder;
-                        mustache_map_builder = mustache_map_builder
-                            .insert(key.to_string(), &object)
-                            .expect("Could not insert object");
+                        update_map.insert(key.to_owned(), object);
                     }
                 }
                 toml.placeholders = Some(update_map);
@@ -643,7 +641,7 @@ fn install(git_repo: &str, plugin_name: &str) {
     let mut toml = read_config(&path_to_module.join("config.toml")).expect("Cannot find TOML");
     if let Some(internal_deps) = toml.plugin_info.internal_dependencies.as_mut() {
         for dep in internal_deps {
-            install(git_repo, &dep);
+            install(git_repo, dep);
         }
     }
     if let Some(external_deps) = toml.plugin_info.external_dependencies.as_ref() {
@@ -666,6 +664,7 @@ fn install(git_repo: &str, plugin_name: &str) {
             mustache_map_builder = mustache_map_builder
                 .insert(placeholder.0, &object)
                 .expect("Could not parse object");
+            *placeholder.1 = object;
         }
     }
     let home_path = HOME.join(plugin_name);
