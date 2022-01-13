@@ -567,21 +567,24 @@ fn update(git_repo: &str, plugin_name: &str, fail_on_error: bool, silent: bool) 
         return;
     }
 
-    if let PluginType::RustPackage { path, git } = new_config.plugin_info.plugin_type {
+    if let PluginType::RustPackage { path, git, tag } = new_config.plugin_info.plugin_type {
         let mut install_command = Command::new("cargo");
         if let Some(git) = git {
             install_command
                 .env("CARGO_NET_GIT_FETCH_WITH_CLI", "true")
                 .arg("install")
                 .arg("--git")
-                .arg(git)
+                .arg(git);
+            if let Some(tag) = tag {
+                install_command.arg("--tag").arg(tag);
+            }
         } else if let Some(path) = path {
             install_command
                 .arg("install")
                 .arg("--path")
-                .arg(&path_to_module.join(path))
+                .arg(&path_to_module.join(path));
         } else {
-            panic!("either path or git should be set")
+            panic!("either path or git should be set");
         };
         match install_command
             .spawn()
@@ -679,21 +682,24 @@ fn install(git_repo: &str, plugin_name: &str) {
             true,
         );
     }
-    if let PluginType::RustPackage { path, git } = &toml.plugin_info.plugin_type {
+    if let PluginType::RustPackage { path, git, tag } = &toml.plugin_info.plugin_type {
         let mut install_command = Command::new("cargo");
         if let Some(git) = git {
             install_command
                 .env("CARGO_NET_GIT_FETCH_WITH_CLI", "true")
                 .arg("install")
                 .arg("--git")
-                .arg(git)
+                .arg(git);
+            if let Some(tag) = tag {
+                install_command.arg("--tag").arg(tag);
+            }
         } else if let Some(path) = path {
             install_command
                 .arg("install")
                 .arg("--path")
-                .arg(&path_to_module.join(path))
+                .arg(&path_to_module.join(path));
         } else {
-            panic!("either path or git should be set")
+            panic!("either path or git should be set");
         };
         match install_command
             .spawn()
@@ -1147,6 +1153,7 @@ enum PluginType {
     RustPackage {
         path: Option<String>,
         git: Option<String>,
+        tag: Option<String>
     },
 }
 
