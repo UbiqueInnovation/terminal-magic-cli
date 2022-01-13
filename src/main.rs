@@ -492,7 +492,13 @@ fn update(git_repo: &str, plugin_name: &str, fail_on_error: bool, silent: bool) 
 
     if let Some(internal_deps) = toml.plugin_info.internal_dependencies.as_mut() {
         for dep in internal_deps {
-            install(git_repo, dep);
+            match check_module_state(git_repo, dep) {
+                ModuleState::NotInstalled => install(git_repo, dep),
+                ModuleState::UpToDate => {}
+                ModuleState::NeedsUpdate(reason) => {
+                    println!("Update since: {:?}", reason);
+                    update(git_repo, dep, false, true)},
+            }
         }
     }
     if let Some(external_deps) = toml.plugin_info.external_dependencies.as_ref() {
@@ -514,7 +520,8 @@ fn update(git_repo: &str, plugin_name: &str, fail_on_error: bool, silent: bool) 
                 .is_some()
             {
                 if let EntryType::Array(arr) = placeholder.1 {
-                    if !silent && boolean_prompt(&format!("Add new elements [{}]? ", placeholder.0)) {
+                    if !silent && boolean_prompt(&format!("Add new elements [{}]? ", placeholder.0))
+                    {
                         if old_config
                             .placeholders
                             .as_ref()
@@ -619,6 +626,48 @@ fn remove(plugin_name: &str) {
         std::process::exit(1);
     }
     std::fs::remove_dir_all(home_path).expect("Could not remove directory");
+}
+
+fn check_module_state(git_repo: &str, plugin_name: &str) -> ModuleState {
+    let home_path = HOME.join(plugin_name);
+    if !home_path.exists() {
+        return ModuleState::NotInstalled;
+    }
+    let config = read_config(&(home_path.join("config.toml"))).expect("No config for module found");
+    let new_config = read_config(&Path::new(&git_repo).join(plugin_name).join("config.toml"))
+        .expect("Cannot find module");
+    if let (Ok(old_version), Ok(new_version)) = (
+        Version::parse(&config.plugin_info.version),
+        Version::parse(&new_config.plugin_info.version),
+    ) {
+        if new_version > old_version {
+            return ModuleState::NeedsUpdate(UpdateReason::NewVersion);
+        }
+    }
+    if config != new_config {
+        return ModuleState::NeedsUpdate(UpdateReason::TomlChanged);
+    }
+    let old_script = home_path.join("script.sh");
+    let new_script = Path::new(&git_repo).join(plugin_name).join("template.sh");
+    if (!old_script.exists() && !new_script.exists())
+        || (old_script.exists() && new_script.exists())
+    {
+        ModuleState::UpToDate
+    } else {
+        ModuleState::NeedsUpdate(UpdateReason::TemplateChanged)
+    }
+}
+
+pub enum ModuleState {
+    NotInstalled,
+    UpToDate,
+    NeedsUpdate(UpdateReason),
+}
+#[derive(Debug, Clone, Copy)]
+pub enum UpdateReason {
+    TomlChanged,
+    TemplateChanged,
+    NewVersion,
 }
 
 fn install(git_repo: &str, plugin_name: &str) {
@@ -1153,7 +1202,7 @@ enum PluginType {
     RustPackage {
         path: Option<String>,
         git: Option<String>,
-        tag: Option<String>
+        tag: Option<String>,
     },
 }
 
