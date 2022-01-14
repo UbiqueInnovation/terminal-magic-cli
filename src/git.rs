@@ -96,6 +96,9 @@ pub fn check_out_modules_with_pw(
 }
 
 pub fn update_git_repo_path(global_config: &mut GlobalConfig) -> Result<(), Error> {
+    if Path::new(&global_config.git_repo).exists() {
+        return Ok(());
+    }
     if !global_config.home.join("git_modules").exists() {
         match std::fs::create_dir_all(global_config.home.join("git_modules")) {
             Ok(_) => {}

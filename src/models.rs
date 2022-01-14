@@ -97,7 +97,12 @@ pub struct GlobalConfig {
     pub ssh_key: Option<String>,
     #[serde(default)]
     pub key_needs_pw: bool,
+    #[serde(default = "default_home")]
     pub home: PathBuf,
+}
+
+fn default_home() -> PathBuf {
+    home_dir().expect("Could not find HOME").join(CONFIG_DIR)
 }
 
 pub static CONFIG_DIR: &str = ".terminal-magic";
