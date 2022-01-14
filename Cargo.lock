@@ -992,6 +992,9 @@ name = "serde"
 version = "1.0.133"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "97565067517b60e2d1ea8b268e59ce036de907ac523ad83a0475da04e818989a"
+dependencies = [
+ "serde_derive",
+]
 
 [[package]]
 name = "serde_derive"
@@ -1065,23 +1068,20 @@ dependencies = [
 
 [[package]]
 name = "terminal-magic"
-version = "0.4.4"
+version = "0.5.0"
 dependencies = [
  "async-std",
  "clap",
  "colored",
  "diff",
  "dirs",
- "futures",
  "git2",
  "indexmap",
- "lazy_static",
  "mustache",
  "prompts",
  "regex",
  "semver",
  "serde",
- "serde_derive",
  "shellexpand",
  "toml",
 ]

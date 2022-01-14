@@ -1,83 +1,48 @@
 #[macro_use]
 extern crate clap;
-#[macro_use]
-extern crate lazy_static;
 use clap::App;
 
-use async_std::task;
 use colored::*;
 use dirs::home_dir;
-use indexmap::IndexMap;
-use mustache::MapBuilder;
-use prompts::{confirm::ConfirmPrompt, text::TextPrompt, Prompt};
 use regex::Regex;
 use semver::Version;
-use serde_derive::{Deserialize, Serialize};
-use std::sync::Mutex;
 use std::{
     path::{Path, PathBuf},
-    process::Command,
     str::FromStr,
 };
-
-static CONFIG_DIR: &str = ".terminal-magic";
-
-lazy_static! {
-    static ref HOME: PathBuf = home_dir().expect("Could not find HOME").join(CONFIG_DIR);
-    static ref GLOBAL_CONFIG: Mutex<GlobalConfig> = {
-        let config_dir = home_dir()
-            .expect("Could not find HOME")
-            .join(CONFIG_DIR)
-            .join("global_config.toml");
-        let res: GlobalConfig;
-        if config_dir.exists() {
-            res = toml::from_str(
-                &std::fs::read_to_string(config_dir).expect("Could not find global config"),
-            )
-            .expect("cannot parse config");
-        } else {
-            if !HOME.join(CONFIG_DIR).exists() {
-                std::fs::create_dir_all(HOME.join(CONFIG_DIR))
-                    .expect("Could not create config dir");
-            }
-            res = GlobalConfig {
-                config_path: config_dir,
-                git_repo: String::from(""),
-                ssh_key: None,
-                key_needs_pw: false,
-            };
-            if res.save().is_err() {
-                eprintln!("{}", "Could not write config".red());
-            }
-        }
-        Mutex::new(res)
-    };
-}
+use terminal_magic::{
+    git::{check_out_modules_with_key, check_out_modules_with_pw, update_modules},
+    models::{GlobalConfig, PluginInfo, CONFIG_DIR},
+    modules::{
+        get_list_of_installed_modules, install::install, read_config, read_dir, remove,
+        update::update, update_source_file,
+    },
+};
 
 fn main() {
     let yaml = load_yaml!("cli.yaml");
     let app = App::from_yaml(yaml);
     let matches = app.get_matches();
+    let mut global_config = GlobalConfig::default();
     let git_repo: String;
-    {
-        let mut glob_conf = GLOBAL_CONFIG.lock().unwrap();
-        if matches.is_present("git_repo") {
-            git_repo = String::from(matches.value_of("git_repo").unwrap());
 
-            glob_conf.git_repo = shellexpand::tilde(&git_repo).to_string();
-            glob_conf.save().expect("Could not save global config");
-        } else {
-            git_repo = shellexpand::tilde(&glob_conf.git_repo.clone()).to_string();
-        }
-        println!("Module Git Repo: {}", git_repo.green());
-        println!();
+    if matches.is_present("git_repo") {
+        git_repo = String::from(matches.value_of("git_repo").unwrap());
+
+        global_config.git_repo = shellexpand::tilde(&git_repo).to_string();
+        global_config.save().expect("Could not save global config");
+    } else {
+        git_repo = shellexpand::tilde(&global_config.git_repo.clone()).to_string();
     }
+    println!("Module Git Repo: {}", git_repo.green());
+    println!();
+
     if matches.is_present("clone") {
         let clone_url = matches.value_of("clone").unwrap();
         if matches.is_present("ssh_key") {
             let ssh_key = Path::new(matches.value_of("ssh_key").unwrap());
             println!("{}{}", "Using key ".green(), ssh_key.to_string_lossy());
-            match check_out_modules_with_key(clone_url, ssh_key) {
+            match check_out_modules_with_key(&mut global_config, clone_url, ssh_key) {
                 Ok(_) => {
                     println!(
                         "{}{}{}",
@@ -92,7 +57,7 @@ fn main() {
                 }
             }
         } else {
-            match check_out_modules_with_pw(clone_url) {
+            match check_out_modules_with_pw(&mut global_config, clone_url) {
                 Ok(_) => {
                     println!(
                         "{}{}{}",
@@ -116,11 +81,12 @@ fn main() {
                 if sub_matches.is_present("INPUT") {
                     let module = sub_matches.value_of("INPUT").unwrap();
                     let module_path = Path::new(module).join("script.sh");
-                    let base = HOME.join(module);
+                    let base = global_config.home.join(module);
 
-                    if let Ok(installed_modules) =
-                        get_list_of_installed_modules(&HOME, &HOME.to_string_lossy())
-                    {
+                    if let Ok(installed_modules) = get_list_of_installed_modules(
+                        &global_config.home,
+                        &global_config.home.to_string_lossy(),
+                    ) {
                         let config: PluginInfo;
                         let mut updated_config: Option<PluginInfo> = None;
                         let mut installed = false;
@@ -200,11 +166,11 @@ fn main() {
                         }
                     }
                     std::process::exit(0);
-                } else if let Err(e) = update_modules() {
+                } else if let Err(e) = update_modules(&mut global_config) {
                     eprintln!("{}{:?}", "Could not update repo".red(), e);
                 }
                 let path_to_module = Path::new(&git_repo);
-                if read_dir(path_to_module, &git_repo).is_err() {
+                if read_dir(&global_config, path_to_module, &git_repo).is_err() {
                     eprintln!("{}", "path not found".red());
                 }
             }
@@ -212,7 +178,7 @@ fn main() {
         Some("install") => {
             if let Some(install_cmd) = matches.subcommand_matches("install") {
                 if let Some(plugin_name) = install_cmd.value_of("INPUT") {
-                    install(&git_repo, plugin_name);
+                    install(&global_config, &git_repo, plugin_name);
                 } else {
                     eprintln!("{}", matches.usage());
                     std::process::exit(1);
@@ -227,9 +193,10 @@ fn main() {
                 if let Some(plugin_name) = install_cmd.value_of("INPUT") {
                     if plugin_name == "all" {
                         println!("{}\n\n", "Start updating all packages".green());
-                        let modules = if let Ok(modules) =
-                            get_list_of_installed_modules(&HOME, &HOME.to_string_lossy())
-                        {
+                        let modules = if let Ok(modules) = get_list_of_installed_modules(
+                            &global_config.home,
+                            &global_config.home.to_string_lossy(),
+                        ) {
                             modules
                         } else {
                             eprintln!("Could not get list of installed modules");
@@ -237,7 +204,7 @@ fn main() {
                         };
                         for module in modules {
                             let module = module.replace("/script.sh", "");
-                            let base = HOME.join(&module);
+                            let base = global_config.home.join(&module);
                             let config = read_config(&(base.join("config.toml")))
                                 .expect("No config for module found");
                             let new_config = read_config(
@@ -257,7 +224,7 @@ fn main() {
                                         old_version,
                                         new_version
                                     );
-                                    update(&git_repo, &module, false, true);
+                                    update(&global_config, &git_repo, &module, false, true);
                                 }
                             }
                         }
@@ -266,7 +233,7 @@ fn main() {
                             "\n 🥳 All updateable packages are up to date.\n".green()
                         );
                     } else {
-                        update(&git_repo, plugin_name, true, false);
+                        update(&global_config, &git_repo, plugin_name, true, false);
                     }
                 } else {
                     eprintln!("{}", matches.usage());
@@ -280,7 +247,7 @@ fn main() {
         Some("remove") => {
             if let Some(install_cmd) = matches.subcommand_matches("remove") {
                 if let Some(plugin_name) = install_cmd.value_of("INPUT") {
-                    remove(plugin_name);
+                    remove(&global_config, plugin_name);
                 } else {
                     eprintln!("{}", matches.usage());
                     std::process::exit(1);
@@ -296,11 +263,14 @@ fn main() {
         }
     }
 
-    if update_source_file().is_err() {
+    if update_source_file(&global_config).is_err() {
         eprintln!("{}", "Could not update globals source file".red());
     } else {
         let command = format!("source ~/{}/env", CONFIG_DIR);
-        let alternative_command = format!("source {}", &HOME.join("env").to_string_lossy());
+        let alternative_command = format!(
+            "source {}",
+            &global_config.home.join("env").to_string_lossy()
+        );
         let zshrc_file = &home_dir()
             .unwrap_or_else(|| PathBuf::from_str("~").unwrap())
             .join(".zshrc");
@@ -315,925 +285,5 @@ fn main() {
             CONFIG_DIR.green(),
             "/env".green()
         )
-    }
-}
-
-fn read_dir(dir: &Path, base: &str) -> std::io::Result<()> {
-    if dir.is_dir() {
-        for entry in std::fs::read_dir(dir)? {
-            let entry = entry?;
-            let path = entry.path();
-
-            let str_path = path.to_string_lossy();
-            if str_path.contains(".git") {
-                continue;
-            }
-            if path.is_dir() {
-                let _ = read_dir(&path, base);
-            }
-            if path.ends_with("config.toml") {
-                let module = dir.strip_prefix(base).unwrap();
-                let module_str: ColoredString;
-                let mut installed = "";
-                let mut version = String::from("");
-                let module_path = HOME.join(module);
-                let mut repo_version = String::from("");
-                if module_path.exists() {
-                    module_str = module.to_string_lossy().blue();
-                    let toml = read_config(&module_path.join("config.toml"))?;
-                    let new_toml = read_config(&dir.join("config.toml")).unwrap();
-                    version = toml.plugin_info.version.clone();
-                    installed = "(installed)";
-                    if version != new_toml.plugin_info.version {
-                        repo_version = format!(" ({}) ", new_toml.plugin_info.version);
-                    }
-                } else {
-                    module_str = module.to_string_lossy().green();
-                }
-                println!(
-                    "{} {}{} {}",
-                    module_str,
-                    version.blue(),
-                    repo_version.yellow(),
-                    installed.blue()
-                );
-            }
-        }
-    }
-    Ok(())
-}
-
-fn read_config(config_path: &Path) -> Result<PluginInfo, std::io::Error> {
-    let toml_str = std::fs::read_to_string(config_path)?;
-    if let Ok(pi) = toml::from_str(&toml_str) {
-        return Ok(pi);
-    }
-    Err(std::io::Error::from(std::io::ErrorKind::InvalidData))
-}
-
-fn get_list_of_installed_modules(path: &Path, base: &str) -> std::io::Result<Vec<String>> {
-    let mut out_result: Vec<String> = vec![];
-    if path.is_dir() {
-        for entry in path.read_dir()? {
-            let entry = entry?;
-            let path = entry.path();
-            if path.is_dir() {
-                if let Ok(mut list) = get_list_of_installed_modules(&path, base) {
-                    out_result.append(&mut list);
-                }
-            } else if path.to_string_lossy().contains("script.sh") {
-                out_result.push(
-                    path.strip_prefix(base)
-                        .unwrap()
-                        .to_string_lossy()
-                        .to_string(),
-                );
-            }
-        }
-    }
-    Ok(out_result)
-}
-
-fn update_source_file() -> std::io::Result<()> {
-    let base = &HOME;
-    let modules = get_list_of_installed_modules(base, &base.to_string_lossy())?;
-    let env_path = base.join("env");
-    if env_path.exists() {
-        std::fs::remove_file(&env_path).expect("Cannot delete file");
-    }
-    let mapped_values: String = modules
-        .into_iter()
-        .map(|val| format!("source {}", base.join(val).to_string_lossy()))
-        .collect::<Vec<String>>()
-        .join("\n");
-    std::fs::write(env_path, mapped_values)?;
-    Ok(())
-}
-
-fn boolean_prompt(prompt_string: &str) -> bool {
-    let mut prompt = ConfirmPrompt::new(prompt_string);
-    match task::block_on(async { prompt.run().await }) {
-        Ok(Some(val)) => val,
-        _ => std::process::exit(1),
-    }
-}
-fn text_prompt(prompt_string: &str) -> Option<String> {
-    let mut prompt = TextPrompt::new(prompt_string);
-    match task::block_on(async { prompt.run().await }) {
-        Ok(val) => val,
-        _ => None,
-    }
-}
-fn password_prompt(prompt_string: &str) -> Option<String> {
-    let mut prompt = TextPrompt::new(prompt_string).with_style(prompts::text::Style::Password);
-    match task::block_on(async { prompt.run().await }) {
-        Ok(val) => val,
-        _ => None,
-    }
-}
-
-fn update(git_repo: &str, plugin_name: &str, fail_on_error: bool, silent: bool) {
-    let home_path = HOME.join(plugin_name);
-    if !home_path.exists() {
-        eprintln!("module is not installed");
-        if fail_on_error {
-            std::process::exit(1);
-        }
-        return;
-    }
-    let path_to_module = Path::new(git_repo).join(plugin_name);
-    if !path_to_module.exists() {
-        eprintln!(
-            "{}",
-            "Could not find module in the git repo. Did you execute `git pull`?".red()
-        );
-        if fail_on_error {
-            std::process::exit(1);
-        }
-        return;
-    }
-    let mustache = mustache::compile_path(path_to_module.join("template.sh"))
-        .expect("Could not parse mustache template");
-
-    let mut toml = read_config(&home_path.join("data.toml")).expect("Cannot find TOML");
-    let old_toml = toml.clone();
-    let old_config = read_config(&home_path.join("config.toml"))
-        .expect("Cannot find old config (maybe you did update terminal-magic)");
-    let new_config =
-        read_config(&path_to_module.join("config.toml")).expect("module config not found");
-    let mut mustache_map_builder = MapBuilder::new();
-    if old_config != new_config {
-        println!("{}", "Config changed check the changes".yellow());
-
-        let old_config_str = toml::to_string(&old_config).unwrap();
-        let new_config_str = toml::to_string(&new_config).unwrap();
-        print_diff(&old_config_str, &new_config_str);
-        if old_config.placeholders != new_config.placeholders {
-            let mut update_map = IndexMap::new();
-            if let Some(new_placeholders) = &new_config.placeholders {
-                for (key, entry) in new_placeholders {
-                    if let Some(v) = toml.placeholders.as_ref().and_then(|a| a.get(key)) {
-                        update_map.insert(key.to_owned(), v.to_owned());
-                    } else {
-                        // prompt new value
-                        let (new_mustache_map_builder, object) =
-                            read(key, entry, mustache_map_builder);
-                        mustache_map_builder = new_mustache_map_builder;
-                        update_map.insert(key.to_owned(), object);
-                    }
-                }
-                toml.placeholders = Some(update_map);
-            } else {
-                toml.placeholders = None;
-            }
-        }
-    }
-    toml.plugin_info = new_config.plugin_info.clone();
-
-    if let Some(internal_deps) = toml.plugin_info.internal_dependencies.as_mut() {
-        for dep in internal_deps {
-            match check_module_state(git_repo, dep) {
-                ModuleState::NotInstalled => install(git_repo, dep),
-                ModuleState::UpToDate => {}
-                ModuleState::NeedsUpdate(reason) => {
-                    println!("Update since: {:?}", reason);
-                    update(git_repo, dep, false, true)},
-            }
-        }
-    }
-    if let Some(external_deps) = toml.plugin_info.external_dependencies.as_ref() {
-        for dep in external_deps {
-            println!(
-                "[{}] needs external dependency {}",
-                plugin_name.yellow(),
-                dep.yellow()
-            );
-        }
-    }
-
-    if let Some(placeholders) = toml.placeholders.as_mut() {
-        for placeholder in placeholders.iter_mut() {
-            if old_toml
-                .placeholders
-                .as_ref()
-                .and_then(|a| a.get(placeholder.0))
-                .is_some()
-            {
-                if let EntryType::Array(arr) = placeholder.1 {
-                    if !silent && boolean_prompt(&format!("Add new elements [{}]? ", placeholder.0))
-                    {
-                        if old_config
-                            .placeholders
-                            .as_ref()
-                            .unwrap()
-                            .get(placeholder.0)
-                            .is_some()
-                        {
-                            let (new_mustache_map_builder, object) =
-                                read_array(placeholder.0, &arr[0], mustache_map_builder);
-                            mustache_map_builder = new_mustache_map_builder;
-                            arr.extend(if let EntryType::Array(a) = object {
-                                a
-                            } else {
-                                unreachable!("read_array MUST always return an EntryType::Array")
-                            });
-                        }
-                    } else {
-                        let name = get_short_names(arr);
-                        mustache_map_builder = mustache_map_builder
-                            .insert_str(format!("{}_shortNames", placeholder.0), name);
-                    }
-                }
-            }
-            mustache_map_builder = mustache_map_builder
-                .insert(placeholder.0, &placeholder.1)
-                .expect("Could not parse object");
-        }
-    }
-    let should_overwrite = boolean_prompt("Update supporting files?");
-
-    if let Some(files) = &new_config.supporting_files {
-        let home_path = HOME.join(plugin_name);
-        mustache_map_builder = add_files_as_vars(
-            files,
-            mustache_map_builder,
-            &home_path,
-            &path_to_module,
-            &home_path,
-            should_overwrite,
-        );
-    }
-
-    let mustache_map = mustache_map_builder.build();
-    let script = render(mustache, mustache_map);
-    let old_script = get_old_script(plugin_name);
-
-    print_diff(&old_script, &script);
-
-    if !boolean_prompt("Update?") {
-        return;
-    }
-
-    if let PluginType::RustPackage { path, git, tag } = new_config.plugin_info.plugin_type {
-        let mut install_command = Command::new("cargo");
-        if let Some(git) = git {
-            install_command
-                .env("CARGO_NET_GIT_FETCH_WITH_CLI", "true")
-                .arg("install")
-                .arg("--git")
-                .arg(git);
-            if let Some(tag) = tag {
-                install_command.arg("--tag").arg(tag);
-            }
-        } else if let Some(path) = path {
-            install_command
-                .arg("install")
-                .arg("--path")
-                .arg(&path_to_module.join(path));
-        } else {
-            panic!("either path or git should be set");
-        };
-        match install_command
-            .spawn()
-            .expect("Could not install module")
-            .wait_with_output()
-        {
-            Ok(_) => println!("Successfully installed rust-module"),
-            Err(err) => panic!("{:?}", err),
-        }
-    }
-    write_file(toml, script, plugin_name, &path_to_module);
-}
-
-fn print_diff(left: &str, right: &str) {
-    for diff in diff::lines(left, right) {
-        match diff {
-            diff::Result::Left(l) => println!("-{}", l.red()),
-            diff::Result::Both(_, _) => {}
-            diff::Result::Right(r) => println!("+{}", r.green()),
-        }
-    }
-}
-
-fn remove(plugin_name: &str) {
-    let home_path = HOME.join(plugin_name);
-    if !home_path.exists() {
-        eprintln!(
-            "{}{}",
-            "Could not find installed module ".red(),
-            plugin_name
-        );
-        std::process::exit(1);
-    }
-    std::fs::remove_dir_all(home_path).expect("Could not remove directory");
-}
-
-fn check_module_state(git_repo: &str, plugin_name: &str) -> ModuleState {
-    let home_path = HOME.join(plugin_name);
-    if !home_path.exists() {
-        return ModuleState::NotInstalled;
-    }
-    let config = read_config(&(home_path.join("config.toml"))).expect("No config for module found");
-    let new_config = read_config(&Path::new(&git_repo).join(plugin_name).join("config.toml"))
-        .expect("Cannot find module");
-    if let (Ok(old_version), Ok(new_version)) = (
-        Version::parse(&config.plugin_info.version),
-        Version::parse(&new_config.plugin_info.version),
-    ) {
-        if new_version > old_version {
-            return ModuleState::NeedsUpdate(UpdateReason::NewVersion);
-        }
-    }
-    if config != new_config {
-        return ModuleState::NeedsUpdate(UpdateReason::TomlChanged);
-    }
-    let old_script = home_path.join("script.sh");
-    let new_script = Path::new(&git_repo).join(plugin_name).join("template.sh");
-    if (!old_script.exists() && !new_script.exists())
-        || (old_script.exists() && new_script.exists())
-    {
-        ModuleState::UpToDate
-    } else {
-        ModuleState::NeedsUpdate(UpdateReason::TemplateChanged)
-    }
-}
-
-pub enum ModuleState {
-    NotInstalled,
-    UpToDate,
-    NeedsUpdate(UpdateReason),
-}
-#[derive(Debug, Clone, Copy)]
-pub enum UpdateReason {
-    TomlChanged,
-    TemplateChanged,
-    NewVersion,
-}
-
-fn install(git_repo: &str, plugin_name: &str) {
-    let home_path = HOME.join(plugin_name);
-    if home_path.exists() {
-        update(git_repo, plugin_name, false, true);
-        return;
-    }
-    let path_to_module = Path::new(git_repo).join(plugin_name);
-    if !path_to_module.exists() {
-        eprintln!(
-            "{}",
-            "Could not find module in the git repo. Did you execute `git pull`?".red()
-        );
-        std::process::exit(1);
-    }
-    let mustache = mustache::compile_path(path_to_module.join("template.sh"))
-        .expect("Could not parse mustache template");
-
-    let mut toml = read_config(&path_to_module.join("config.toml")).expect("Cannot find TOML");
-    if let Some(internal_deps) = toml.plugin_info.internal_dependencies.as_mut() {
-        for dep in internal_deps {
-            install(git_repo, dep);
-        }
-    }
-    if let Some(external_deps) = toml.plugin_info.external_dependencies.as_ref() {
-        for dep in external_deps {
-            println!(
-                "[{}] needs external dependency {}",
-                plugin_name.yellow(),
-                dep.yellow()
-            );
-        }
-    }
-    let mut mustache_map_builder = MapBuilder::new();
-    if let Some(placeholders) = toml.placeholders.as_mut() {
-        for placeholder in placeholders.iter_mut() {
-            println!("Read {}", placeholder.0);
-            let (new_mustache_map_builder, object) =
-                read(placeholder.0, placeholder.1, mustache_map_builder);
-            mustache_map_builder = new_mustache_map_builder;
-
-            mustache_map_builder = mustache_map_builder
-                .insert(placeholder.0, &object)
-                .expect("Could not parse object");
-            *placeholder.1 = object;
-        }
-    }
-    let home_path = HOME.join(plugin_name);
-    if std::fs::create_dir_all(&home_path).is_ok() {
-        println!("Created Plugin directory");
-    }
-    println!("Copying supporting files");
-    if let Some(files) = &toml.supporting_files {
-        mustache_map_builder = add_files_as_vars(
-            files,
-            mustache_map_builder,
-            &home_path,
-            &path_to_module,
-            &home_path,
-            true,
-        );
-    }
-    if let PluginType::RustPackage { path, git, tag } = &toml.plugin_info.plugin_type {
-        let mut install_command = Command::new("cargo");
-        if let Some(git) = git {
-            install_command
-                .env("CARGO_NET_GIT_FETCH_WITH_CLI", "true")
-                .arg("install")
-                .arg("--git")
-                .arg(git);
-            if let Some(tag) = tag {
-                install_command.arg("--tag").arg(tag);
-            }
-        } else if let Some(path) = path {
-            install_command
-                .arg("install")
-                .arg("--path")
-                .arg(&path_to_module.join(path));
-        } else {
-            panic!("either path or git should be set");
-        };
-        match install_command
-            .spawn()
-            .expect("Could not install module")
-            .wait_with_output()
-        {
-            Ok(_) => println!("Successfully installed rust-module"),
-            Err(err) => panic!("{:?}", err),
-        }
-    }
-
-    let mustache_map = mustache_map_builder.build();
-    let script = render(mustache, mustache_map);
-    write_file(toml, script, plugin_name, &path_to_module);
-}
-
-fn add_files_as_vars(
-    files: &IndexMap<String, FileSystemEntry>,
-    mut mustache_map_builder: MapBuilder,
-    home: &Path,
-    path_to_module: &Path,
-    cwd: &Path,
-    should_overwrite: bool,
-) -> MapBuilder {
-    if should_overwrite {
-        write_supporting_files(files, home, path_to_module, cwd);
-    }
-    for (place_holder, entry) in files.iter() {
-        match entry {
-            FileSystemEntry::File {
-                version: _version,
-                path,
-                destination,
-            } => {
-                let destination = if let Some(destination) = destination {
-                    destination
-                        .to_owned()
-                        .parse()
-                        .expect("Could not parse path")
-                } else {
-                    cwd.join(path)
-                };
-
-                mustache_map_builder = mustache_map_builder
-                    .insert(place_holder, &destination.to_string_lossy())
-                    .expect("Error inserting file placeholder");
-            }
-            FileSystemEntry::Directory {
-                version: _version,
-                destination,
-                path,
-                files,
-            } => {
-                let destination = if let Some(destination) = destination {
-                    destination
-                        .to_owned()
-                        .parse()
-                        .expect("Could not parse path")
-                } else {
-                    cwd.join(path)
-                };
-
-                mustache_map_builder = mustache_map_builder
-                    .insert(place_holder, &destination.to_string_lossy())
-                    .expect("Error inserting file placeholder");
-                mustache_map_builder = add_files_as_vars(
-                    files,
-                    mustache_map_builder,
-                    home,
-                    path_to_module,
-                    cwd,
-                    should_overwrite,
-                );
-            }
-        }
-    }
-    mustache_map_builder
-}
-
-fn write_supporting_files(
-    files: &IndexMap<String, FileSystemEntry>,
-    home: &Path,
-    path_to_module: &Path,
-    cwd: &Path,
-) {
-    for (_, file) in files {
-        match file {
-            FileSystemEntry::File {
-                version,
-                path,
-                destination,
-            } => {
-                let destination = if let Some(destination) = destination {
-                    destination
-                        .to_owned()
-                        .parse()
-                        .expect("Could not parse path")
-                } else {
-                    cwd.join(path)
-                };
-                if std::fs::remove_file(&destination).is_ok() {
-                    println!(
-                        "{:?} existed, overwriting with new version: {}",
-                        destination, version
-                    );
-                }
-                let source_relative = path.parse::<PathBuf>().expect("Source path is invalid");
-                let source = path_to_module.join(source_relative);
-                if let Err(err) = std::fs::copy(&source, &destination) {
-                    panic!(
-                        "Could not copy file from source {:?} to {:?}\n{:?}",
-                        source, destination, err
-                    );
-                }
-            }
-            FileSystemEntry::Directory {
-                version,
-                path,
-                destination,
-                files,
-            } => {
-                let destination = if let Some(destination) = destination {
-                    destination
-                        .to_owned()
-                        .parse()
-                        .expect("Could not parse path")
-                } else {
-                    cwd.join(path)
-                };
-
-                if std::fs::create_dir_all(&destination).is_ok() {
-                    println!("Created {:?} [{}]", destination, version);
-                }
-                write_supporting_files(files, home, path_to_module, &destination);
-            }
-        }
-    }
-}
-
-fn get_old_script(plugin_name: &str) -> String {
-    let home_path = HOME.join(plugin_name);
-    std::fs::read_to_string(home_path.join("script.sh")).expect("Old script was not existent")
-}
-
-fn write_file(toml: PluginInfo, script: String, plugin_name: &str, path_to_module: &Path) {
-    let home_path = HOME.join(plugin_name);
-    if std::fs::create_dir_all(&home_path).is_ok() {
-        println!("Created directory");
-    }
-    if std::fs::remove_file(home_path.join("script.sh")).is_ok() {
-        println!("script.sh already existed");
-    }
-    if std::fs::copy(
-        path_to_module.join("config.toml"),
-        home_path.join("config.toml"),
-    )
-    .is_ok()
-    {}
-
-    // if let Some(files) = &toml.supporting_files {
-    //     write_supporting_files(files, &home_path, path_to_module, &home_path);
-    // }
-
-    if std::fs::write(home_path.join("script.sh"), script).is_ok() {
-        if std::fs::remove_file(home_path.join("data.toml")).is_ok() {
-            println!("data.toml File existed");
-        }
-        if std::fs::write(
-            home_path.join("data.toml"),
-            toml::to_vec(&toml).expect("could not serialize data"),
-        )
-        .is_ok()
-        {
-            println!("Successfully wrote plugin {}!", plugin_name);
-        }
-    }
-}
-
-fn render(mustache: mustache::Template, mustache_map: mustache::Data) -> String {
-    mustache
-        .render_data_to_string(&mustache_map)
-        .expect("Could not render mustache template")
-}
-
-fn read(key: &str, entry_type: &EntryType, map_builder: MapBuilder) -> (MapBuilder, EntryType) {
-    match entry_type {
-        EntryType::Value(str) => (map_builder, read_value(key, str)),
-        EntryType::Array(array) => read_array(key, &array[0], map_builder),
-        EntryType::Object(obj) => read_object(obj, map_builder),
-    }
-}
-
-fn read_value(key: &str, str: &str) -> EntryType {
-    let mut prompt = TextPrompt::new(format!("{} [{}]? ", key, str));
-    match task::block_on(async { prompt.run().await }) {
-        Ok(Some(s)) => {
-            if !s.is_empty() {
-                EntryType::Value(shellexpand::tilde(&s).to_string())
-            } else {
-                EntryType::Value(shellexpand::tilde(&str).to_string())
-            }
-        }
-        _ => std::process::exit(1),
-    }
-}
-
-fn get_short_names(array: &[EntryType]) -> String {
-    let mut short_names: Vec<String> = vec![];
-    for entry in array {
-        if let EntryType::Object(obj) = entry {
-            if obj.contains_key("shortName") {
-                if let Some(EntryType::Value(short_name)) = obj.get("shortName") {
-                    short_names.push(short_name.clone());
-                }
-            }
-        }
-    }
-    short_names.join(" ")
-}
-
-fn read_array(
-    key: &str,
-    proto_type: &EntryType,
-    mut map_builder: MapBuilder,
-) -> (MapBuilder, EntryType) {
-    let mut new_array = vec![];
-    loop {
-        let object = proto_type.clone();
-        let (new_map_builder, object_to_insert) = read(key, &object, map_builder);
-        map_builder = new_map_builder;
-        new_array.push(object_to_insert);
-        let mut prompt = ConfirmPrompt::new("Another one? ");
-        match task::block_on(async { prompt.run().await }) {
-            Ok(Some(true)) => continue,
-            _ => break,
-        }
-    }
-    let name = get_short_names(&new_array);
-    map_builder = map_builder.insert_str(format!("{}_shortNames", key), name);
-    (map_builder, EntryType::Array(new_array))
-}
-
-fn read_object(
-    obj: &IndexMap<String, EntryType>,
-    mut map_builder: MapBuilder,
-) -> (MapBuilder, EntryType) {
-    let mut new_obj = IndexMap::new();
-    for keys in obj.iter() {
-        let (new_map_builder, object) = read(keys.0, keys.1, map_builder);
-        map_builder = new_map_builder;
-        new_obj.insert(keys.0.to_string(), object);
-    }
-    (map_builder, EntryType::Object(new_obj))
-}
-
-//GIT Section
-use git2::{Commit, Cred, Error, ObjectType, RemoteCallbacks, Repository};
-
-fn get_callbacks<'a>(ssh_key: Option<PathBuf>, key_needs_pw: bool) -> RemoteCallbacks<'a> {
-    let mut callbacks = RemoteCallbacks::new();
-    callbacks.credentials(move |_url, username_from_url, allowed_types| {
-        let mut username = String::from("");
-        if let Some(name_from_url) = username_from_url {
-            username = String::from(name_from_url);
-        } else if let Some(user) = text_prompt("Git Username: ") {
-            username = user;
-        }
-
-        if allowed_types.is_user_pass_plaintext() {
-            if let Some(password) = password_prompt("Git Password: ") {
-                Cred::userpass_plaintext(&username, &password)
-            } else {
-                Cred::default()
-            }
-        } else if allowed_types.is_ssh_key() {
-            if let Some(ssh_key) = &ssh_key {
-                if key_needs_pw {
-                    if let Some(key_pw) = password_prompt("SSH key password: ") {
-                        Cred::ssh_key(&username, None, ssh_key, Some(&key_pw))
-                    } else {
-                        Cred::default()
-                    }
-                } else {
-                    Cred::ssh_key(&username, None, ssh_key, None)
-                }
-            } else if let Some(key_path) = text_prompt("SSH Key Path: ") {
-                let key_path = shellexpand::tilde(&key_path).to_string();
-                GLOBAL_CONFIG.lock().unwrap().ssh_key = Some(key_path.clone());
-                let key_path = Path::new(&key_path);
-                let key_needs_pw = boolean_prompt("Is the key password protected? ");
-                GLOBAL_CONFIG.lock().unwrap().key_needs_pw = key_needs_pw;
-                if key_needs_pw {
-                    if let Some(key_pw) = password_prompt("SSH key password: ") {
-                        Cred::ssh_key(&username, None, key_path, Some(&key_pw))
-                    } else {
-                        Cred::default()
-                    }
-                } else {
-                    Cred::ssh_key(&username, None, key_path, None)
-                }
-            } else {
-                Cred::default()
-            }
-        } else {
-            Cred::default()
-        }
-    });
-    callbacks
-}
-
-fn check_out_modules_with_key(remote: &str, ssh_key: &Path) -> Result<(), Error> {
-    let key_needs_pw = boolean_prompt("Does key need password? ");
-    GLOBAL_CONFIG.lock().unwrap().key_needs_pw = key_needs_pw;
-    GLOBAL_CONFIG.lock().unwrap().ssh_key = Some(String::from(ssh_key.to_string_lossy()));
-    let callbacks = get_callbacks(Some(ssh_key.into()), false);
-    check_out(remote, callbacks)?;
-    Ok(())
-}
-
-fn check_out_modules_with_pw(remote: &str) -> Result<(), Error> {
-    let callbacks = get_callbacks(None, false);
-    check_out(remote, callbacks)?;
-    Ok(())
-}
-
-fn check_out(remote: &str, callbacks: RemoteCallbacks) -> Result<(), Error> {
-    let mut fo = git2::FetchOptions::new();
-    fo.remote_callbacks(callbacks);
-
-    let mut builder = git2::build::RepoBuilder::new();
-    builder.fetch_options(fo);
-
-    if !HOME.join("git_modules").exists() {
-        match std::fs::create_dir_all(HOME.join("git_modules")) {
-            Ok(_) => {}
-            Err(_) => {
-                eprintln!("Could not create git_modules");
-                std::process::exit(1);
-            }
-        }
-    }
-    builder.clone(remote, &HOME.join("git_modules"))?;
-    let mut config = GLOBAL_CONFIG.lock().unwrap();
-    config.git_repo = HOME.join("git_modules").to_string_lossy().to_string();
-    if config.save().is_err() {
-        eprintln!("{}", "Could not write config".red());
-    }
-    Ok(())
-}
-
-fn update_modules() -> Result<(), Error> {
-    let config = GLOBAL_CONFIG.lock().unwrap();
-    let mut fo = git2::FetchOptions::new();
-    let mut ssh_key: Option<PathBuf> = None;
-    if let Some(key) = config.ssh_key.clone() {
-        ssh_key = Some(Path::new(&key).into());
-    }
-
-    let callbacks = get_callbacks(ssh_key, config.key_needs_pw);
-    fo.remote_callbacks(callbacks);
-    match Repository::open(shellexpand::tilde(&config.git_repo).to_string()) {
-        Ok(repo) => {
-            fetch_origin_master(&repo, fo)?;
-            fast_forward(&repo)?;
-            println!("{}", "Updated repo to newest revision".green());
-        }
-        Err(e) => {
-            eprintln!("Could not update repo, manual update needed: {:?}", e);
-        }
-    }
-    Ok(())
-}
-
-fn fetch_origin_master(
-    repo: &git2::Repository,
-    mut opts: git2::FetchOptions,
-) -> Result<(), git2::Error> {
-    repo.find_remote("origin")?
-        .fetch(&["master"], Some(&mut opts), None)
-}
-
-fn fast_forward(repo: &Repository) -> Result<(), Error> {
-    let fetch_head = repo.find_reference("FETCH_HEAD")?;
-    let fetch_commit = repo.reference_to_annotated_commit(&fetch_head)?;
-    let analysis = repo.merge_analysis(&[&fetch_commit])?;
-    if analysis.0.is_up_to_date() {
-        Ok(())
-    } else if analysis.0.is_fast_forward() {
-        let refname = format!("refs/heads/{}", "master");
-        let mut reference = repo.find_reference(&refname)?;
-        reference.set_target(fetch_commit.id(), "Fast-Forward")?;
-        repo.set_head(&refname)?;
-        repo.checkout_head(Some(git2::build::CheckoutBuilder::default().force()))
-    } else {
-        Err(Error::from_str("Fast-forward only!"))
-    }
-}
-pub fn find_last_commit(repo: &Repository) -> Result<Commit, git2::Error> {
-    let obj = repo.head()?.resolve()?.peel(ObjectType::Commit)?;
-    match obj.into_commit() {
-        Ok(c) => Ok(c),
-        Err(_) => Err(Error::from_str("commit error")),
-    }
-}
-
-#[derive(Deserialize, Serialize, Debug, PartialEq, Clone)]
-struct PluginInfo {
-    plugin_info: Package,
-    placeholders: Option<IndexMap<String, EntryType>>,
-    // interpreter: Option<Interpreter>,
-    supporting_files: Option<IndexMap<String, FileSystemEntry>>,
-}
-
-#[derive(Deserialize, Serialize, Debug, PartialEq, Clone)]
-#[serde(untagged)]
-enum FileSystemEntry {
-    Directory {
-        version: String,
-        path: String,
-        destination: Option<String>,
-        files: IndexMap<String, FileSystemEntry>,
-    },
-    File {
-        version: String,
-        path: String,
-        destination: Option<String>,
-    },
-}
-
-// #[derive(Deserialize,Serialize,Debug,PartialEq)]
-// struct Interpreter {
-//     name : String,
-//     install_path: String
-// }
-
-#[derive(Deserialize, Serialize, Debug, PartialEq, Clone)]
-struct Package {
-    author: String,
-    version: String,
-    help: Option<String>,
-    internal_dependencies: Option<Vec<String>>,
-    external_dependencies: Option<Vec<String>>,
-    plugin_type: PluginType,
-}
-
-#[derive(Deserialize, Serialize, Debug, PartialEq, Clone)]
-#[serde(untagged)]
-enum PluginType {
-    Shell(String),
-    Script(String),
-    RustPackage {
-        path: Option<String>,
-        git: Option<String>,
-        tag: Option<String>,
-    },
-}
-
-#[derive(Deserialize, Serialize, Clone, Debug, PartialEq)]
-#[serde(untagged)]
-enum EntryType {
-    Value(String),
-    Object(IndexMap<String, EntryType>),
-    Array(Vec<EntryType>),
-}
-
-impl std::fmt::Display for EntryType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        if let EntryType::Value(val) = self {
-            return f.write_str(val);
-        }
-        f.write_str("")
-    }
-}
-#[derive(Deserialize, Serialize, Debug, PartialEq)]
-struct GlobalConfig {
-    config_path: PathBuf,
-    git_repo: String,
-    ssh_key: Option<String>,
-    #[serde(default)]
-    key_needs_pw: bool,
-}
-
-impl GlobalConfig {
-    fn save(&self) -> std::io::Result<()> {
-        std::fs::write(self.config_path.as_path(), toml::to_string(self).unwrap())?;
-        Ok(())
     }
 }
