@@ -109,24 +109,24 @@ pub static CONFIG_DIR: &str = ".terminal-magic";
 
 impl GlobalConfig {
     pub fn new() -> Self {
-        let home = home_dir().expect("Could not find HOME").join(CONFIG_DIR);
-        let config_dir = home.join("global_config.toml");
+        let config_dir = home_dir().expect("Could not find HOME").join(CONFIG_DIR);
+        let config_file = config_dir.join("global_config.toml");
         let res: GlobalConfig;
-        if config_dir.exists() {
+        if config_file.exists() {
             res = toml::from_str(
-                &std::fs::read_to_string(&config_dir).expect("Could not find global config"),
+                &std::fs::read_to_string(&config_file).expect("Could not find global config"),
             )
             .expect("cannot parse config");
         } else {
-            if !config_dir.exists() {
+            if !config_file.exists() {
                 std::fs::create_dir_all(&config_dir).expect("Could not create config dir");
             }
             res = Self {
-                config_path: config_dir,
+                config_path: config_file,
                 git_repo: String::from(""),
                 ssh_key: None,
                 key_needs_pw: false,
-                home,
+                home: config_dir,
             };
             if res.save().is_err() {
                 eprintln!("{}", "Could not write config".red());

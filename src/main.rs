@@ -38,7 +38,7 @@ struct TerminalMagicArgs {
     #[structopt(help = "Ssh key to clone repository", short = "s", long = "ssh_key")]
     ssh_key: Option<String>,
     #[structopt(subcommand)]
-    subcommand: TerminalMagicAction,
+    subcommand: Option<TerminalMagicAction>,
 }
 #[derive(StructOpt)]
 pub enum TerminalMagicAction {
@@ -122,8 +122,11 @@ fn main() {
         }
         std::process::exit(0);
     }
+    let subcommand = if let Some(subcommand) = cli_args.subcommand {subcommand} else {
+        std::process::exit(0);
+    };
 
-    match cli_args.subcommand {
+    match subcommand {
         TerminalMagicAction::List(list_args) => {
             if let Some(module) = list_args.input.as_ref() {
                 let module_path = Path::new(module).join("script.sh");
@@ -203,11 +206,11 @@ fn main() {
                     if let Some(placeholders) = &config.placeholders {
                         print!("{}", format!("{:?}", placeholders).green());
                     }
+                    std::process::exit(0);
                 }
             } else {
                 update_modules(&mut global_config).expect("Could not update modules");
             }
-            // std::process::exit(0);
 
             let path_to_module = Path::new(&git_repo);
             if read_dir(&global_config, path_to_module, &git_repo).is_err() {

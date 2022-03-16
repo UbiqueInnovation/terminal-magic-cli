@@ -1,6 +1,6 @@
 [package]
 name = "terminal-magic"
-version = "0.5.0"
+version = "0.5.1"
 authors = ["Systems @ Ubique <backend@ubique.ch>"]
 edition = "2018"
 description = "Package to organize shell extensions andd scripts"
@@ -22,7 +22,7 @@ colored = "2.0.0"
 diff = "0.1.12"
 shellexpand = "2.1.0"
 indexmap = { version = "1.8.0", features = ["serde-1"] }
-git2 = "0.13.25"
+git2 = "0.14.2"
 regex = "1.5.4"
 semver = "1.0.4"
 structopt = "0.3.25"
