@@ -96,11 +96,13 @@ pub fn update_source_file(global_config: &GlobalConfig) -> std::io::Result<()> {
     if env_path.exists() {
         std::fs::remove_file(&env_path).expect("Cannot delete file");
     }
-    let mapped_values: String = modules
+    let mut mapped_values: String = modules
         .into_iter()
         .map(|val| format!("source {}", base.join(val).to_string_lossy()))
-        .collect::<Vec<String>>()
-        .join("\n");
+        .collect::<Vec<String>>().join("\n");
+    mapped_values.push_str("\nFPATH=\"");
+    mapped_values.push_str(&base.join("completion").to_string_lossy());
+    mapped_values.push_str(":$FPATH\"\n");
     std::fs::write(env_path, mapped_values)?;
     Ok(())
 }
