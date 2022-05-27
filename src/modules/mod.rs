@@ -130,6 +130,12 @@ pub fn remove(global_config: &GlobalConfig, plugin_name: &str) {
         std::process::exit(1);
     }
     std::fs::remove_dir_all(home_path).expect("Could not remove directory");
+    let mut file_name = plugin_name.to_string().split_once('/').expect("Could not remove autocompletion file").1.to_string();
+    file_name.insert_str(0, "_");
+    let file_path = global_config.home.join("completion").join(&file_name);
+    if file_path.exists() {
+        std::fs::remove_file(file_path).expect("Could not remove autocompletion file");
+    }
 }
 
 pub fn check_module_state(global_config: &GlobalConfig, git_repo: &str, plugin_name: &str) -> ModuleState {
