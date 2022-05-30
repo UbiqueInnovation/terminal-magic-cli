@@ -96,11 +96,11 @@ pub fn update_source_file(global_config: &GlobalConfig) -> std::io::Result<()> {
     if env_path.exists() {
         std::fs::remove_file(&env_path).expect("Cannot delete file");
     }
-    let mapped_values: String = modules
+    let mut mapped_values: String = modules
         .into_iter()
         .map(|val| format!("source {}", base.join(val).to_string_lossy()))
-        .collect::<Vec<String>>()
-        .join("\n");
+        .collect::<Vec<String>>().join("\n");
+    mapped_values.push_str(&format!("\nexport FPATH=\"{}:$FPATH\"\n", &base.join("completion").to_string_lossy()));
     std::fs::write(env_path, mapped_values)?;
     Ok(())
 }
@@ -128,6 +128,12 @@ pub fn remove(global_config: &GlobalConfig, plugin_name: &str) {
         std::process::exit(1);
     }
     std::fs::remove_dir_all(home_path).expect("Could not remove directory");
+    let mut file_name = plugin_name.to_string().split_once('/').expect("Could not remove autocompletion file").1.to_string();
+    file_name.insert_str(0, "_");
+    let file_path = global_config.home.join("completion").join(&file_name);
+    if file_path.exists() {
+        std::fs::remove_file(file_path).expect("Could not remove autocompletion file");
+    }
 }
 
 pub fn check_module_state(global_config: &GlobalConfig, git_repo: &str, plugin_name: &str) -> ModuleState {
