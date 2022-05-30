@@ -100,9 +100,7 @@ pub fn update_source_file(global_config: &GlobalConfig) -> std::io::Result<()> {
         .into_iter()
         .map(|val| format!("source {}", base.join(val).to_string_lossy()))
         .collect::<Vec<String>>().join("\n");
-    mapped_values.push_str("\nFPATH=\"");
-    mapped_values.push_str(&base.join("completion").to_string_lossy());
-    mapped_values.push_str(":$FPATH\"\n");
+    mapped_values.push_str(&format!("\nexport FPATH=\"{}:$FPATH\"\n", &base.join("completion").to_string_lossy()));
     std::fs::write(env_path, mapped_values)?;
     Ok(())
 }
