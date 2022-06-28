@@ -86,12 +86,17 @@ fn main() {
     println!("Module Git Repo: {}", git_repo.green());
     println!();
 
+    // save the config just generally everytime
+    let _ = global_config.save();
+
     if let Some(clone_url) = &cli_args.clone {
         if let Some(ssh_key) = &cli_args.ssh_key {
             let ssh_key = Path::new(ssh_key);
             println!("{}{}", "Using key ".green(), ssh_key.to_string_lossy());
             match check_out_modules_with_key(&mut global_config, clone_url, ssh_key) {
                 Ok(_) => {
+                    // save the ssh key and if it needs a pw
+                    let _ = global_config.save();
                     println!(
                         "{}{}{}",
                         "Clone repsitory from ".yellow(),
