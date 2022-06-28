@@ -94,11 +94,17 @@ impl std::fmt::Display for EntryType {
 pub struct GlobalConfig {
     pub config_path: PathBuf,
     pub git_repo: String,
+    #[serde(default = "default_branch")]
+    pub git_main_branch: String,
     pub ssh_key: Option<String>,
     #[serde(default)]
     pub key_needs_pw: bool,
     #[serde(default = "default_home")]
     pub home: PathBuf,
+}
+
+fn default_branch() -> String {
+    "main".to_string()
 }
 
 fn default_home() -> PathBuf {
@@ -127,6 +133,7 @@ impl GlobalConfig {
                 ssh_key: None,
                 key_needs_pw: false,
                 home: config_dir,
+                git_main_branch: String::from("main")
             };
             if res.save().is_err() {
                 eprintln!("{}", "Could not write config".red());

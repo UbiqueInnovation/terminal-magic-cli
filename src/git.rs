@@ -142,12 +142,13 @@ pub fn update_modules(global_config: &mut GlobalConfig) -> Result<(), Error> {
         ssh_key = Some(Path::new(&key).into());
     }
     let git_repo = global_config.git_repo.clone();
+    let branch = global_config.git_main_branch.clone();
     let callbacks = get_callbacks(global_config, ssh_key, global_config.key_needs_pw);
     fo.remote_callbacks(callbacks);
     match Repository::open(shellexpand::tilde(&git_repo).to_string()) {
         Ok(repo) => {
-            fetch_origin_master(&repo, fo)?;
-            fast_forward(&repo)?;
+            fetch_origin_master(&repo, fo, &branch)?;
+            fast_forward(&repo, &branch)?;
             println!("{}", "Updated repo to newest revision".green());
         }
         Err(e) => {
@@ -160,19 +161,20 @@ pub fn update_modules(global_config: &mut GlobalConfig) -> Result<(), Error> {
 pub fn fetch_origin_master(
     repo: &git2::Repository,
     mut opts: git2::FetchOptions,
+    branch: &str,
 ) -> Result<(), git2::Error> {
     repo.find_remote("origin")?
-        .fetch(&["master"], Some(&mut opts), None)
+        .fetch(&[branch], Some(&mut opts), None)
 }
 
-pub fn fast_forward(repo: &Repository) -> Result<(), Error> {
+pub fn fast_forward(repo: &Repository, branch: &str) -> Result<(), Error> {
     let fetch_head = repo.find_reference("FETCH_HEAD")?;
     let fetch_commit = repo.reference_to_annotated_commit(&fetch_head)?;
     let analysis = repo.merge_analysis(&[&fetch_commit])?;
     if analysis.0.is_up_to_date() {
         Ok(())
     } else if analysis.0.is_fast_forward() {
-        let refname = format!("refs/heads/{}", "master");
+        let refname = format!("refs/heads/{}", branch);
         let mut reference = repo.find_reference(&refname)?;
         reference.set_target(fetch_commit.id(), "Fast-Forward")?;
         repo.set_head(&refname)?;
