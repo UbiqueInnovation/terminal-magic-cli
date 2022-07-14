@@ -3,7 +3,7 @@ use std::path::Path;
 use colored::{ColoredString, Colorize};
 use semver::Version;
 
-use crate::models::{GlobalConfig, PluginInfo, ModuleState, UpdateReason};
+use crate::models::{GlobalConfig, ModuleState, PluginInfo, UpdateReason};
 
 // Copyright (c) 2022 Patrick Amrein <amrein@ubique.ch>
 //
@@ -88,7 +88,7 @@ pub fn get_list_of_installed_modules(path: &Path, base: &str) -> std::io::Result
     }
     Ok(out_result)
 }
-
+use std::fmt::Write;
 pub fn update_source_file(global_config: &GlobalConfig) -> std::io::Result<()> {
     let base = &global_config.home;
     let modules = get_list_of_installed_modules(base, &base.to_string_lossy())?;
@@ -99,13 +99,18 @@ pub fn update_source_file(global_config: &GlobalConfig) -> std::io::Result<()> {
     let mut mapped_values: String = modules
         .into_iter()
         .map(|val| format!("source {}", base.join(val).to_string_lossy()))
-        .collect::<Vec<String>>().join("\n");
-    mapped_values.push_str(&format!("\nexport FPATH=\"{}:$FPATH\"\n", &base.join("completion").to_string_lossy()));
+        .collect::<Vec<String>>()
+        .join("\n");
+    write!(
+        mapped_values,
+        "\nexport FPATH=\"{}:$FPATH\"\n",
+        &base.join("completion").to_string_lossy()
+    )
+    .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+    // mapped_values.push_str(&format!());
     std::fs::write(env_path, mapped_values)?;
     Ok(())
 }
-
-
 
 pub fn print_diff(left: &str, right: &str) {
     for diff in diff::lines(left, right) {
@@ -128,15 +133,24 @@ pub fn remove(global_config: &GlobalConfig, plugin_name: &str) {
         std::process::exit(1);
     }
     std::fs::remove_dir_all(home_path).expect("Could not remove directory");
-    let mut file_name = plugin_name.to_string().split_once('/').expect("Could not remove autocompletion file").1.to_string();
-    file_name.insert_str(0, "_");
+    let mut file_name = plugin_name
+        .to_string()
+        .split_once('/')
+        .expect("Could not remove autocompletion file")
+        .1
+        .to_string();
+    file_name.insert(0, '_');
     let file_path = global_config.home.join("completion").join(&file_name);
     if file_path.exists() {
         std::fs::remove_file(file_path).expect("Could not remove autocompletion file");
     }
 }
 
-pub fn check_module_state(global_config: &GlobalConfig, git_repo: &str, plugin_name: &str) -> ModuleState {
+pub fn check_module_state(
+    global_config: &GlobalConfig,
+    git_repo: &str,
+    plugin_name: &str,
+) -> ModuleState {
     let home_path = global_config.home.join(plugin_name);
     if !home_path.exists() {
         return ModuleState::NotInstalled;
