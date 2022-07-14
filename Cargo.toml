@@ -1,6 +1,6 @@
 [package]
 name = "terminal-magic"
-version = "0.5.4"
+version = "0.5.5"
 authors = ["Systems @ Ubique <backend@ubique.ch>"]
 edition = "2018"
 description = "Package to organize shell extensions andd scripts"
