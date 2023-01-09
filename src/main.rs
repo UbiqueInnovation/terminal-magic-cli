@@ -119,8 +119,8 @@ fn main() {
                         " successfully".yellow()
                     );
                 }
-                Err(_) => {
-                    eprintln!("{}", "Could not clone module".red());
+                Err(e) => {
+                    eprintln!("{}{:?}", "Could not clone module: ".red(), e);
                     std::process::exit(1);
                 }
             }
