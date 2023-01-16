@@ -13,7 +13,7 @@ Use `cargo install terminal-magic` to install the binary, or build it by yoursel
 
 You need to initialize the `terminal-magic` with a git repository containing modules. For that proceed as following:
 
-- `terminal-magic --clone <git_repo_url_with_user_name> [--ssh_key <key>]` (if something goes wrong during clone, you might need to delete `~/.terminal-magic/git_modules` and try again.)
+- `terminal-magic --clone <git_modules_repo_url_with_user_name> [--ssh_key <key>]` (if something goes wrong during clone, you might need to delete `~/.terminal-magic/git_modules` and try again.)
 
 - `terminal-magic list`
 
@@ -41,9 +41,13 @@ If there are any placeholders defined in the script, the CLI asks for entries. I
 
 The original config file, the script and the data are placed in the `~/.terminal-magic/zsh/test` folder (following the same path structure as in the repository).
 
+### `tm` alias and auto-completion
+
+Install the `zsh/terminal-magic` to enable the alias `tm` for `terminal-magic` with auto-completion on the commands and module names.
+
 ### Updating modules
 
-Currently updating only works via the CLI if the placeholders don't change. Use the `update` command to update a module `cargo update zsh/test`. The script will show a diff of the config, and of the expanded script which you have to acknowledge.
+Currently, updating only works via the CLI if the placeholders don't change. Use the `update` command to update a module `cargo update zsh/test`. The script will show a diff of the config, and of the expanded script which you have to acknowledge.
 
 The update command can also be used to add new elements to an array placeholder. Though, any more advanced updates should be performed in the `data.toml` in the respective folder under `~/.terminal-magic`. This is also the place, where to perform the update manually.
 
