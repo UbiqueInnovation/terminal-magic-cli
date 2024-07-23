@@ -19,6 +19,8 @@ You need to initialize the `terminal-magic` with a git repository containing mod
 
 After that it is important to add a `source ~/.terminal-magic/env` statement to your `~/.zshrc` in order to load the terminal-magic commands.
 
+Note that you need to have added the GitHub remote host key at some point beforehand, i.e. you need to have successfully cloned a repository via the command line.
+
 ### Configuration
 
 All configuration (e.g. the git_repo path and the ssh_key) are saved in the `~/.terminal-magic/global_config.toml` file. You can adjust the properties at your will, as the config is read each time the CLI is run.
